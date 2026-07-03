@@ -9,6 +9,7 @@ import numpy as np
 @dataclass
 class FakeQuery:
     text: str
+    answer: str = ""
     embedding: Optional[np.ndarray] = None
     query_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     memory_id: str = ""
@@ -32,6 +33,7 @@ class MemoryEntry:
                 {
                     "query_id": fq.query_id,
                     "text": fq.text,
+                    "answer": fq.answer,
                     "memory_id": fq.memory_id,
                     "embedding": fq.embedding.tolist() if fq.embedding is not None else None,
                 }
@@ -54,6 +56,7 @@ class MemoryEntry:
             emb = np.array(fq_data["embedding"]) if fq_data.get("embedding") is not None else None
             fq = FakeQuery(
                 text=fq_data["text"],
+                answer=fq_data.get("answer", ""),
                 embedding=emb,
                 query_id=fq_data.get("query_id", uuid.uuid4().hex[:12]),
                 memory_id=fq_data.get("memory_id", entry.memory_id),
@@ -65,6 +68,7 @@ class MemoryEntry:
 @dataclass
 class SubQuery:
     text: str
+    keywords: str = ""
     embedding: Optional[np.ndarray] = None
     index: int = 0
 

@@ -28,9 +28,10 @@ class EmbeddingConfig:
 @dataclass
 class RetrievalConfig:
     alpha: float = 0.7
-    top_k_per_sub: int = 5
-    top_n: int = 10
-    num_fake_queries: int = 5
+    top_k_per_sub: int = 20
+    top_n: int = 5
+    top_k_q2c: int = 3
+    num_fake_queries: int = 10
 
 
 @dataclass

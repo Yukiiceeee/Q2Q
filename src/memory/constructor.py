@@ -24,15 +24,27 @@ class MemoryConstructor:
     def build_memory(self, session_text: str, metadata: dict | None = None) -> MemoryEntry:
         entry = MemoryEntry(session_text=session_text, metadata=metadata or {})
 
-        # Step 1: generate fake queries
-        query_texts = self.query_generator.generate(session_text)
-        logger.info(f"Generated {len(query_texts)} fake queries for memory {entry.memory_id}")
+        # Step 1: generate fake queries with answers (two-stage LLM pipeline)
+        query_answer_pairs = self.query_generator.generate(session_text)
+        logger.info(f"Generated {len(query_answer_pairs)} fake query-answer pairs for memory {entry.memory_id}")
 
-        # Step 2: compute embeddings for fake queries
-        if query_texts:
-            query_embeddings = self.embedding_provider.embed_batch(query_texts)
-            for text, emb in zip(query_texts, query_embeddings):
-                fq = FakeQuery(text=text, embedding=emb, memory_id=entry.memory_id)
+        # Step 2: compute embeddings for fake queries (query + answer concatenated for richer vectors)
+        if query_answer_pairs:
+            embed_texts = []
+            for pair in query_answer_pairs:
+                combined = pair["query"]
+                if pair.get("answer"):
+                    combined += " " + pair["answer"]
+                embed_texts.append(combined)
+
+            query_embeddings = self.embedding_provider.embed_batch(embed_texts)
+            for pair, emb in zip(query_answer_pairs, query_embeddings):
+                fq = FakeQuery(
+                    text=pair["query"],
+                    answer=pair.get("answer", ""),
+                    embedding=emb,
+                    memory_id=entry.memory_id,
+                )
                 entry.fake_queries.append(fq)
 
         # Step 3: compute content embeddings (sliding window for long text)

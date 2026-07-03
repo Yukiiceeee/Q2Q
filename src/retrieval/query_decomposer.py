@@ -27,47 +27,69 @@ class QueryDecomposer:
         prompt = build_query_decompose_prompt(raw_query, history, self.language)
         messages = format_messages(user_message=prompt)
         response = self.llm_client.chat(messages, temperature=0.3)
-        query_texts = self._parse_sub_queries(response.content)
+        parsed = self._parse_sub_queries(response.content)
 
-        if not query_texts:
-            query_texts = [raw_query]
+        if not parsed:
+            parsed = [{"query": raw_query, "keywords": ""}]
 
-        embeddings = self.embedding_provider.embed_batch(query_texts)
+        embed_texts = []
+        for item in parsed:
+            combined = item["query"]
+            if item.get("keywords"):
+                combined += " " + item["keywords"]
+            embed_texts.append(combined)
+
+        embeddings = self.embedding_provider.embed_batch(embed_texts)
         sub_queries = []
-        for i, (text, emb) in enumerate(zip(query_texts, embeddings)):
-            sub_queries.append(SubQuery(text=text, embedding=emb, index=i))
+        for i, (item, emb) in enumerate(zip(parsed, embeddings)):
+            sub_queries.append(SubQuery(
+                text=item["query"],
+                keywords=item.get("keywords", ""),
+                embedding=emb,
+                index=i,
+            ))
 
         logger.info(f"QueryDecomposer: {len(sub_queries)} sub-queries")
         for sq in sub_queries:
-            logger.debug(f"  SubQuery[{sq.index}]: {sq.text}")
+            logger.debug(f"  SubQuery[{sq.index}]: {sq.text} | keywords: {sq.keywords}")
         return sub_queries
 
-    def _parse_sub_queries(self, content: str) -> list[str]:
+    def _parse_sub_queries(self, content: str) -> list[dict]:
         content = content.strip()
-        try:
-            result = json.loads(content)
-            if isinstance(result, list):
-                return [str(q).strip() for q in result if str(q).strip()]
-        except json.JSONDecodeError:
-            pass
+
+        parsed = self._try_json_parse(content)
+        if parsed:
+            return parsed
 
         match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', content, re.DOTALL)
         if match:
-            try:
-                result = json.loads(match.group(1))
-                if isinstance(result, list):
-                    return [str(q).strip() for q in result if str(q).strip()]
-            except json.JSONDecodeError:
-                pass
+            parsed = self._try_json_parse(match.group(1))
+            if parsed:
+                return parsed
 
         match = re.search(r'\[.*?\]', content, re.DOTALL)
         if match:
-            try:
-                result = json.loads(match.group(0))
-                if isinstance(result, list):
-                    return [str(q).strip() for q in result if str(q).strip()]
-            except json.JSONDecodeError:
-                pass
+            parsed = self._try_json_parse(match.group(0))
+            if parsed:
+                return parsed
 
         lines = [line.strip().strip('-•*').strip() for line in content.split('\n')]
-        return [line for line in lines if line and len(line) > 10][:4]
+        return [{"query": line, "keywords": ""} for line in lines if line and len(line) > 10][:4]
+
+    def _try_json_parse(self, text: str) -> list[dict] | None:
+        try:
+            result = json.loads(text)
+            if isinstance(result, list) and result:
+                output = []
+                for item in result:
+                    if isinstance(item, str) and item.strip():
+                        output.append({"query": item.strip(), "keywords": ""})
+                    elif isinstance(item, dict) and "query" in item:
+                        output.append({
+                            "query": str(item["query"]).strip(),
+                            "keywords": str(item.get("keywords", "")).strip(),
+                        })
+                return output if output else None
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return None

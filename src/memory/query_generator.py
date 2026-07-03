@@ -5,28 +5,58 @@ import logging
 
 from src.utils.llm_client import BaseLLMClient, format_messages
 from src.prompts.fake_query_gen import build_fake_query_gen_prompt
+from src.prompts.fake_answer_gen import build_fake_answer_gen_prompt
 
 logger = logging.getLogger(__name__)
 
 
 class FakeQueryGenerator:
 
-    def __init__(self, llm_client: BaseLLMClient, num_queries: int = 5, language: str = "zh"):
+    def __init__(self, llm_client: BaseLLMClient, num_queries: int = 10, language: str = "zh"):
         self.llm_client = llm_client
         self.num_queries = num_queries
         self.language = language
 
-    def generate(self, session_text: str) -> list[str]:
+    def generate(self, session_text: str) -> list[dict]:
+        """Two-stage pipeline: generate fake queries, then generate answers.
+        Returns list of {"query": str, "answer": str}.
+        """
+        # Stage 1: generate fake queries
+        query_texts = self._generate_queries(session_text)
+        logger.info(f"FakeQueryGenerator Stage 1: {len(query_texts)} queries generated")
+
+        if not query_texts:
+            return []
+
+        # Stage 2: generate answer sequences
+        answers = self._generate_answers(session_text, query_texts)
+        logger.info(f"FakeQueryGenerator Stage 2: {len(answers)} answers generated")
+
+        results = []
+        for i, query in enumerate(query_texts):
+            answer = answers[i] if i < len(answers) else ""
+            results.append({"query": query, "answer": answer})
+            logger.debug(f"  FakeQuery[{i}]: Q={query} | A={answer[:60]}")
+
+        return results
+
+    def _generate_queries(self, session_text: str) -> list[str]:
         prompt = build_fake_query_gen_prompt(session_text, self.num_queries, self.language)
         messages = format_messages(user_message=prompt)
         response = self.llm_client.chat(messages, temperature=0.7)
-        queries = self._parse_queries(response.content)
-        logger.info(f"FakeQueryGenerator produced {len(queries)} queries")
-        for i, q in enumerate(queries):
-            logger.debug(f"  FakeQuery[{i}]: {q}")
-        return queries
+        return self._parse_string_list(response.content)
 
-    def _parse_queries(self, content: str) -> list[str]:
+    def _generate_answers(self, session_text: str, queries: list[str]) -> list[str]:
+        prompt = build_fake_answer_gen_prompt(session_text, queries, self.language)
+        messages = format_messages(user_message=prompt)
+        response = self.llm_client.chat(messages, temperature=0.3)
+        answers = self._parse_string_list(response.content)
+
+        while len(answers) < len(queries):
+            answers.append("")
+        return answers[:len(queries)]
+
+    def _parse_string_list(self, content: str) -> list[str]:
         content = content.strip()
         try:
             result = json.loads(content)
@@ -54,6 +84,7 @@ class FakeQueryGenerator:
                 pass
 
         lines = [line.strip().strip('-•*').strip() for line in content.split('\n')]
-        queries = [line for line in lines if line and len(line) > 10]
-        logger.warning(f"JSON parse failed, extracted {len(queries)} queries from plain text")
-        return queries[:self.num_queries]
+        items = [line for line in lines if line and len(line) > 10]
+        if items:
+            logger.warning(f"JSON parse failed, extracted {len(items)} items from plain text")
+        return items
