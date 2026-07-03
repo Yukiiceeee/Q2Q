@@ -70,6 +70,7 @@ class Q2QAgent:
             alpha=config.retrieval.alpha,
             top_k_per_sub=config.retrieval.top_k_per_sub,
             top_n=config.retrieval.top_n,
+            top_k_q2c=config.retrieval.top_k_q2c,
         )
         self.answerer = Answerer(
             llm_client=self.llm_client,

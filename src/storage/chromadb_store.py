@@ -58,7 +58,7 @@ class ChromaDBStore(BaseMemoryStore):
                 self._fq_collection.add(
                     ids=[fq.query_id],
                     embeddings=[fq.embedding.tolist()],
-                    metadatas=[{"memory_id": entry.memory_id, "text": fq.text}],
+                    metadatas=[{"memory_id": entry.memory_id, "text": fq.text, "answer": fq.answer}],
                     documents=[fq.text],
                 )
 
@@ -77,6 +77,7 @@ class ChromaDBStore(BaseMemoryStore):
             "memory_id": entry.memory_id,
             "session_text": entry.session_text,
             "fake_query_texts": "|".join(fq.text for fq in entry.fake_queries),
+            "fake_query_answers": "|".join(fq.answer for fq in entry.fake_queries),
             "created_at": entry.created_at,
         }
         self._meta_collection.upsert(
@@ -101,13 +102,17 @@ class ChromaDBStore(BaseMemoryStore):
                 session_text=meta.get("session_text", ""),
                 created_at=meta.get("created_at", ""),
             )
-            # Reconstruct fake queries (text only, embeddings loaded on demand)
+            # Reconstruct fake queries (text + answer, embeddings loaded on demand)
             fq_texts = meta.get("fake_query_texts", "")
+            fq_answers = meta.get("fake_query_answers", "")
             if fq_texts:
-                for text in fq_texts.split("|"):
+                texts = fq_texts.split("|")
+                answers = fq_answers.split("|") if fq_answers else []
+                for j, text in enumerate(texts):
                     if text.strip():
+                        answer = answers[j].strip() if j < len(answers) else ""
                         entry.fake_queries.append(
-                            FakeQuery(text=text.strip(), memory_id=mid)
+                            FakeQuery(text=text.strip(), answer=answer, memory_id=mid)
                         )
             entries.append(entry)
         return entries
@@ -123,10 +128,16 @@ class ChromaDBStore(BaseMemoryStore):
             created_at=meta.get("created_at", ""),
         )
         fq_texts = meta.get("fake_query_texts", "")
+        fq_answers = meta.get("fake_query_answers", "")
         if fq_texts:
-            for text in fq_texts.split("|"):
+            texts = fq_texts.split("|")
+            answers = fq_answers.split("|") if fq_answers else []
+            for j, text in enumerate(texts):
                 if text.strip():
-                    entry.fake_queries.append(FakeQuery(text=text.strip(), memory_id=memory_id))
+                    answer = answers[j].strip() if j < len(answers) else ""
+                    entry.fake_queries.append(
+                        FakeQuery(text=text.strip(), answer=answer, memory_id=memory_id)
+                    )
         return entry
 
     def delete(self, memory_id: str) -> bool:
