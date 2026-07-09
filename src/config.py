@@ -32,6 +32,8 @@ class RetrievalConfig:
     top_n: int = 5
     top_k_q2c: int = 3
     num_fake_queries: int = 10
+    version_threshold: float = 0.80
+    version_chain_depth: int = 3
 
 
 @dataclass

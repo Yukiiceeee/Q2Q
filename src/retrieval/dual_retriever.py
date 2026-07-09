@@ -6,6 +6,7 @@ from src.schemas.models import (
     MemoryEntry,
     SubQuery,
     RetrievalResult,
+    VersionChainNode,
 )
 from src.embedding.base import BaseEmbeddingProvider
 from src.storage.base import BaseMemoryStore
@@ -19,8 +20,9 @@ class DualRetriever:
 
     Retrieval flow:
       Phase 1 (Q2Q): Search fake queries, get top-k hits per sub-query.
+      Phase 1.5 (Version Chain Expansion): For hits with chain_id, recall neighboring nodes.
       Phase 2 (Merge): Group hits by session/memory, compute per-session Q2Q score.
-      Phase 3 (Q2C Rerank): If candidates > top_n, do Q2C scoring to rerank; otherwise return directly.
+      Phase 3 (Q2C Rerank): If candidates > top_n, do Q2C scoring to rerank.
     """
 
     def __init__(
@@ -31,6 +33,7 @@ class DualRetriever:
         top_k_per_sub: int = 20,
         top_n: int = 5,
         top_k_q2c: int = 3,
+        version_chain_depth: int = 3,
     ):
         self.embedding_provider = embedding_provider
         self.memory_store = memory_store
@@ -38,6 +41,7 @@ class DualRetriever:
         self.top_k_per_sub = top_k_per_sub
         self.top_n = top_n
         self.top_k_q2c = top_k_q2c
+        self.version_chain_depth = version_chain_depth
         self._use_chromadb = isinstance(memory_store, ChromaDBStore)
 
     def retrieve(self, sub_queries: list[SubQuery]) -> list[RetrievalResult]:
@@ -52,9 +56,8 @@ class DualRetriever:
         store: ChromaDBStore = self.memory_store
 
         # --- Phase 1: Q2Q search ---
-        # For each sub-query, search top_k_per_sub fake query hits
-        # Aggregate all hits by memory_id (session-level)
         candidate_map: dict[str, dict] = {}
+        matched_fq_details: dict[str, list[dict]] = {}
 
         for sq in sub_queries:
             if sq.embedding is None:
@@ -64,23 +67,54 @@ class DualRetriever:
             for hit in fq_hits:
                 mid = hit["memory_id"]
                 if mid not in candidate_map:
-                    candidate_map[mid] = {
-                        "score_q2q": 0.0,
-                        "matched_fqs": [],
-                    }
-                fq_text = hit["text"]
-                fq_score = hit["score"]
+                    candidate_map[mid] = {"score_q2q": 0.0, "matched_fqs": []}
+                    matched_fq_details[mid] = []
 
+                fq_score = hit["score"]
                 if fq_score > candidate_map[mid]["score_q2q"]:
                     candidate_map[mid]["score_q2q"] = fq_score
 
+                fq_text = hit["text"]
                 already = any(t == fq_text for t, _, _ in candidate_map[mid]["matched_fqs"])
                 if not already:
                     candidate_map[mid]["matched_fqs"].append((fq_text, sq.text, fq_score))
+                    matched_fq_details[mid].append(hit)
 
         if not candidate_map:
             logger.info("[ChromaDB] Q2Q found no candidates")
             return []
+
+        # --- Phase 1.5: Version Chain Expansion ---
+        chain_contexts: dict[str, list[list[dict]]] = {}
+
+        for mid, details in matched_fq_details.items():
+            chains_for_memory = []
+            seen_chains: set[str] = set()
+            for hit in details:
+                chain_id = hit.get("chain_id", "")
+                if not chain_id or chain_id in seen_chains:
+                    continue
+                seen_chains.add(chain_id)
+
+                all_nodes = store.get_chain_nodes(chain_id)
+                if len(all_nodes) <= 1:
+                    continue
+
+                hit_seq = hit.get("version_seq", 0)
+                hit_idx = next(
+                    (i for i, n in enumerate(all_nodes) if n["version_seq"] == hit_seq),
+                    -1,
+                )
+                if hit_idx == -1:
+                    neighbors = all_nodes[-self.version_chain_depth:]
+                else:
+                    start = max(0, hit_idx - 1)
+                    end = min(len(all_nodes), hit_idx + self.version_chain_depth + 1)
+                    neighbors = all_nodes[start:end]
+
+                chains_for_memory.append(neighbors)
+
+            chain_contexts[mid] = chains_for_memory
 
         # --- Phase 2: Sort candidates by Q2Q score ---
         sorted_candidates = sorted(
@@ -93,15 +127,13 @@ class DualRetriever:
 
         # --- Phase 3: Q2C rerank (only if candidates > top_n) ---
         if len(sorted_candidates) <= self.top_n:
-            # No need for Q2C, return all candidates directly
-            results = self._build_results_chromadb(store, sorted_candidates)
+            results = self._build_results_chromadb(store, sorted_candidates, chain_contexts)
             logger.info(
                 f"[ChromaDB] Candidates ({len(sorted_candidates)}) <= top_n ({self.top_n}), "
                 f"skipping Q2C, returning all"
             )
             return results
         else:
-            # Do Q2C reranking on all candidates, take top_n
             for mid, info in sorted_candidates:
                 best_q2c = 0.0
                 for sq in sub_queries:
@@ -114,7 +146,6 @@ class DualRetriever:
                         best_q2c = q2c_score
                 info["score_q2c"] = best_q2c
 
-            # Recompute final scores and re-sort
             for mid, info in sorted_candidates:
                 info["final_score"] = (
                     self.alpha * info["score_q2q"]
@@ -124,7 +155,7 @@ class DualRetriever:
             sorted_candidates.sort(key=lambda x: x[1]["final_score"], reverse=True)
             top_candidates = sorted_candidates[:self.top_n]
 
-            results = self._build_results_chromadb(store, top_candidates)
+            results = self._build_results_chromadb(store, top_candidates, chain_contexts)
             logger.info(
                 f"[ChromaDB] Q2C rerank: {len(sorted_candidates)} candidates -> top {self.top_n}"
             )
@@ -134,6 +165,7 @@ class DualRetriever:
         self,
         store: ChromaDBStore,
         candidates: list[tuple[str, dict]],
+        chain_contexts: dict[str, list[list[dict]]] | None = None,
     ) -> list[RetrievalResult]:
         results: list[RetrievalResult] = []
         for mid, info in candidates:
@@ -147,6 +179,23 @@ class DualRetriever:
 
             final_score = info.get("final_score", info["score_q2q"])
 
+            # Build version chain context
+            version_chain_context: list[list[VersionChainNode]] = []
+            if chain_contexts and mid in chain_contexts:
+                for chain_nodes in chain_contexts[mid]:
+                    node_list = [
+                        VersionChainNode(
+                            query_id=n["query_id"],
+                            text=n["text"],
+                            answer=n["answer"],
+                            memory_id=n["memory_id"],
+                            version_seq=n["version_seq"],
+                            created_at=n.get("created_at", ""),
+                        )
+                        for n in chain_nodes
+                    ]
+                    version_chain_context.append(node_list)
+
             results.append(RetrievalResult(
                 memory=memory,
                 score_q2q=info["score_q2q"],
@@ -154,6 +203,7 @@ class DualRetriever:
                 final_score=final_score,
                 matched_fake_queries=matched_fqs,
                 matched_sub_queries=matched_sqs,
+                version_chain_context=version_chain_context,
             ))
         return results
 
@@ -167,22 +217,28 @@ class DualRetriever:
 
         # --- Phase 1: Q2Q scoring ---
         candidate_map: dict[str, dict] = {}
+        matched_fq_details: dict[str, list[dict]] = {}
 
         for memory in memories:
             mid = memory.memory_id
             best_q2q = 0.0
             matched_fqs: list[tuple[str, str, float]] = []
+            fq_details: list[dict] = []
 
             for sq in sub_queries:
                 if sq.embedding is None:
                     continue
-                score, fq_text = self._compute_q2q_score(sq, memory)
+                score, fq_text, fq_chain_id, fq_version_seq = self._compute_q2q_score(sq, memory)
                 if score > best_q2q:
                     best_q2q = score
                 if score > 0.0 and fq_text:
                     already = any(t == fq_text for t, _, _ in matched_fqs)
                     if not already:
                         matched_fqs.append((fq_text, sq.text, score))
+                        fq_details.append({
+                            "chain_id": fq_chain_id,
+                            "version_seq": fq_version_seq,
+                        })
 
             if best_q2q > 0.0:
                 candidate_map[mid] = {
@@ -190,10 +246,41 @@ class DualRetriever:
                     "matched_fqs": matched_fqs,
                     "memory": memory,
                 }
+                matched_fq_details[mid] = fq_details
 
         if not candidate_map:
             logger.warning("Q2Q found no candidates")
             return []
+
+        # --- Phase 1.5: Version Chain Expansion ---
+        chain_contexts: dict[str, list[list[dict]]] = {}
+        for mid, details in matched_fq_details.items():
+            chains_for_memory = []
+            seen_chains: set[str] = set()
+            for hit in details:
+                chain_id = hit.get("chain_id", "")
+                if not chain_id or chain_id in seen_chains:
+                    continue
+                seen_chains.add(chain_id)
+
+                all_nodes = self.memory_store.get_chain_nodes(chain_id)
+                if len(all_nodes) <= 1:
+                    continue
+
+                hit_seq = hit.get("version_seq", 0)
+                hit_idx = next(
+                    (i for i, n in enumerate(all_nodes) if n["version_seq"] == hit_seq),
+                    -1,
+                )
+                if hit_idx == -1:
+                    neighbors = all_nodes[-self.version_chain_depth:]
+                else:
+                    start = max(0, hit_idx - 1)
+                    end = min(len(all_nodes), hit_idx + self.version_chain_depth + 1)
+                    neighbors = all_nodes[start:end]
+
+                chains_for_memory.append(neighbors)
+            chain_contexts[mid] = chains_for_memory
 
         # --- Phase 2: Sort by Q2Q score ---
         sorted_candidates = sorted(
@@ -206,7 +293,7 @@ class DualRetriever:
 
         # --- Phase 3: Q2C rerank (only if candidates > top_n) ---
         if len(sorted_candidates) <= self.top_n:
-            results = self._build_results_bruteforce(sorted_candidates)
+            results = self._build_results_bruteforce(sorted_candidates, chain_contexts)
             logger.info(
                 f"[BruteForce] Candidates ({len(sorted_candidates)}) <= top_n ({self.top_n}), "
                 f"skipping Q2C, returning all"
@@ -231,7 +318,7 @@ class DualRetriever:
             sorted_candidates.sort(key=lambda x: x[1]["final_score"], reverse=True)
             top_candidates = sorted_candidates[:self.top_n]
 
-            results = self._build_results_bruteforce(top_candidates)
+            results = self._build_results_bruteforce(top_candidates, chain_contexts)
             logger.info(
                 f"[BruteForce] Q2C rerank: {len(sorted_candidates)} candidates -> top {self.top_n}"
             )
@@ -240,6 +327,7 @@ class DualRetriever:
     def _build_results_bruteforce(
         self,
         candidates: list[tuple[str, dict]],
+        chain_contexts: dict[str, list[list[dict]]] | None = None,
     ) -> list[RetrievalResult]:
         results: list[RetrievalResult] = []
         for mid, info in candidates:
@@ -249,6 +337,22 @@ class DualRetriever:
 
             final_score = info.get("final_score", info["score_q2q"])
 
+            version_chain_context: list[list[VersionChainNode]] = []
+            if chain_contexts and mid in chain_contexts:
+                for chain_nodes in chain_contexts[mid]:
+                    node_list = [
+                        VersionChainNode(
+                            query_id=n["query_id"],
+                            text=n["text"],
+                            answer=n["answer"],
+                            memory_id=n["memory_id"],
+                            version_seq=n["version_seq"],
+                            created_at=n.get("created_at", ""),
+                        )
+                        for n in chain_nodes
+                    ]
+                    version_chain_context.append(node_list)
+
             results.append(RetrievalResult(
                 memory=info["memory"],
                 score_q2q=info["score_q2q"],
@@ -256,14 +360,17 @@ class DualRetriever:
                 final_score=final_score,
                 matched_fake_queries=matched_fqs,
                 matched_sub_queries=matched_sqs,
+                version_chain_context=version_chain_context,
             ))
         return results
 
-    def _compute_q2q_score(self, sq: SubQuery, memory: MemoryEntry) -> tuple[float, str]:
+    def _compute_q2q_score(self, sq: SubQuery, memory: MemoryEntry) -> tuple[float, str, str, int]:
         if not memory.fake_queries or sq.embedding is None:
-            return 0.0, ""
+            return 0.0, "", "", 0
         best_score = -1.0
         best_text = ""
+        best_chain_id = ""
+        best_version_seq = 0
         for fq in memory.fake_queries:
             if fq.embedding is None:
                 continue
@@ -271,7 +378,9 @@ class DualRetriever:
             if sim > best_score:
                 best_score = sim
                 best_text = fq.text
-        return max(best_score, 0.0), best_text
+                best_chain_id = fq.chain_id
+                best_version_seq = fq.version_seq
+        return max(best_score, 0.0), best_text, best_chain_id, best_version_seq
 
     def _compute_q2c_score(self, sq: SubQuery, memory: MemoryEntry) -> float:
         if not memory.content_embeddings or sq.embedding is None:
@@ -281,6 +390,5 @@ class DualRetriever:
             sim = BaseEmbeddingProvider.cosine_similarity(sq.embedding, chunk_emb)
             scores.append(sim)
         scores.sort(reverse=True)
-        # Take average of top_k_q2c chunks as Q2C score
         top_scores = scores[:self.top_k_q2c]
         return max(sum(top_scores) / len(top_scores), 0.0) if top_scores else 0.0
