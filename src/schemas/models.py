@@ -13,6 +13,9 @@ class FakeQuery:
     embedding: Optional[np.ndarray] = None
     query_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     memory_id: str = ""
+    supersedes: str = ""
+    version_seq: int = 0
+    chain_id: str = ""
 
 
 @dataclass
@@ -36,6 +39,9 @@ class MemoryEntry:
                     "answer": fq.answer,
                     "memory_id": fq.memory_id,
                     "embedding": fq.embedding.tolist() if fq.embedding is not None else None,
+                    "supersedes": fq.supersedes,
+                    "version_seq": fq.version_seq,
+                    "chain_id": fq.chain_id,
                 }
                 for fq in self.fake_queries
             ],
@@ -60,9 +66,22 @@ class MemoryEntry:
                 embedding=emb,
                 query_id=fq_data.get("query_id", uuid.uuid4().hex[:12]),
                 memory_id=fq_data.get("memory_id", entry.memory_id),
+                supersedes=fq_data.get("supersedes", ""),
+                version_seq=fq_data.get("version_seq", 0),
+                chain_id=fq_data.get("chain_id", ""),
             )
             entry.fake_queries.append(fq)
         return entry
+
+
+@dataclass
+class VersionChainNode:
+    query_id: str
+    text: str
+    answer: str
+    memory_id: str
+    version_seq: int
+    created_at: str = ""
 
 
 @dataclass
@@ -81,6 +100,7 @@ class RetrievalResult:
     final_score: float = 0.0
     matched_fake_queries: list[str] = field(default_factory=list)
     matched_sub_queries: list[str] = field(default_factory=list)
+    version_chain_context: list[list[VersionChainNode]] = field(default_factory=list)
 
 
 @dataclass

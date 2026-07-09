@@ -14,6 +14,7 @@ from src.storage.json_store import JsonMemoryStore
 from src.storage.chromadb_store import ChromaDBStore
 from src.memory.query_generator import FakeQueryGenerator
 from src.memory.constructor import MemoryConstructor
+from src.memory.version_detector import VersionDetector
 from src.retrieval.query_decomposer import QueryDecomposer
 from src.retrieval.dual_retriever import DualRetriever
 from src.retrieval.answerer import Answerer
@@ -46,6 +47,13 @@ class Q2QAgent:
         # Storage
         self.memory_store: BaseMemoryStore = self._create_store(config)
 
+        # Version detector
+        self.version_detector = VersionDetector(
+            memory_store=self.memory_store,
+            embedding_provider=self.embedding_provider,
+            threshold=config.retrieval.version_threshold,
+        )
+
         # Memory construction
         self.query_generator = FakeQueryGenerator(
             llm_client=self.llm_client,
@@ -56,6 +64,7 @@ class Q2QAgent:
             query_generator=self.query_generator,
             embedding_provider=self.embedding_provider,
             memory_store=self.memory_store,
+            version_detector=self.version_detector,
         )
 
         # Retrieval
@@ -71,6 +80,7 @@ class Q2QAgent:
             top_k_per_sub=config.retrieval.top_k_per_sub,
             top_n=config.retrieval.top_n,
             top_k_q2c=config.retrieval.top_k_q2c,
+            version_chain_depth=config.retrieval.version_chain_depth,
         )
         self.answerer = Answerer(
             llm_client=self.llm_client,
@@ -83,7 +93,8 @@ class Q2QAgent:
         logger.info(
             f"Q2QAgent initialized | model={config.llm.model} | "
             f"embedding={config.embedding.model_name} | "
-            f"storage={config.storage.backend} | lang={config.language}"
+            f"storage={config.storage.backend} | lang={config.language} | "
+            f"version_threshold={config.retrieval.version_threshold}"
         )
 
     def _create_store(self, config: Q2QConfig) -> BaseMemoryStore:
@@ -103,11 +114,11 @@ class Q2QAgent:
 
         entry = self.memory_constructor.build_memory(session_text, metadata)
 
-        # Detailed log output
         logger.info(f"  Memory ID: {entry.memory_id}")
         logger.info(f"  Fake Queries ({len(entry.fake_queries)}):")
         for i, fq in enumerate(entry.fake_queries):
-            logger.info(f"    [{i}] {fq.text}")
+            chain_info = f" [chain={fq.chain_id[:8]}, v{fq.version_seq}]" if fq.chain_id else ""
+            logger.info(f"    [{i}] {fq.text}{chain_info}")
         logger.info(f"  Content Chunks: {len(entry.content_embeddings)}")
         logger.info(f"--- Memorize Complete ---")
 
@@ -135,10 +146,12 @@ class Q2QAgent:
         logger.info(f"  Retrieval Results: {len(results)}")
         for i, r in enumerate(results):
             matched_fqs_preview = r.matched_fake_queries[0][:60] if r.matched_fake_queries else ""
+            chain_count = len(r.version_chain_context)
             logger.info(
                 f"    [{i}] score={r.final_score:.4f} "
                 f"(q2q={r.score_q2q:.4f}, q2c={r.score_q2c:.4f}) "
                 f"memory={r.memory.memory_id[:12]}... "
+                f"chains={chain_count} "
                 f"matched_fq=\"{matched_fqs_preview}\""
             )
 
@@ -161,6 +174,7 @@ class Q2QAgent:
                     "matched_fake_queries": r.matched_fake_queries,
                     "matched_sub_queries": r.matched_sub_queries,
                     "content_preview": r.memory.session_text[:200],
+                    "version_chains": len(r.version_chain_context),
                 }
                 for r in results
             ],

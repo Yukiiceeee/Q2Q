@@ -5,7 +5,10 @@ import logging
 
 from src.utils.llm_client import BaseLLMClient, format_messages
 from src.prompts.fake_query_gen import build_fake_query_gen_prompt
-from src.prompts.fake_answer_gen import build_fake_answer_gen_prompt
+from src.prompts.fake_answer_gen import (
+    build_fake_answer_gen_prompt,
+    build_fake_answer_gen_with_history_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,59 @@ class FakeQueryGenerator:
         while len(answers) < len(queries):
             answers.append("")
         return answers[:len(queries)]
+
+    def _generate_answers_with_history(
+        self,
+        session_text: str,
+        queries: list[str],
+        version_histories: list[dict],
+    ) -> list[str]:
+        """Generate answers with version-aware context.
+
+        Splits queries into those with history and those without,
+        uses different prompts accordingly.
+        """
+        has_history_indices = []
+        no_history_indices = []
+
+        for i, vh in enumerate(version_histories):
+            if vh.get("related_history"):
+                has_history_indices.append(i)
+            else:
+                no_history_indices.append(i)
+
+        answers = [""] * len(queries)
+
+        # Queries without history: standard path
+        if no_history_indices:
+            no_hist_queries = [queries[i] for i in no_history_indices]
+            no_hist_answers = self._generate_answers(session_text, no_hist_queries)
+            for idx, ans in zip(no_history_indices, no_hist_answers):
+                answers[idx] = ans
+
+        # Queries with history: version-aware prompt
+        if has_history_indices:
+            hist_queries = [queries[i] for i in has_history_indices]
+            hist_contexts = [version_histories[i] for i in has_history_indices]
+
+            prompt = build_fake_answer_gen_with_history_prompt(
+                session_text, hist_queries, hist_contexts, self.language
+            )
+            messages = format_messages(user_message=prompt)
+            response = self.llm_client.chat(messages, temperature=0.3)
+            hist_answers = self._parse_string_list(response.content)
+
+            while len(hist_answers) < len(hist_queries):
+                hist_answers.append("")
+
+            for idx, ans in zip(has_history_indices, hist_answers[:len(has_history_indices)]):
+                answers[idx] = ans
+
+        logger.info(
+            f"FakeQueryGenerator answers: "
+            f"{len(no_history_indices)} standard, {len(has_history_indices)} with history"
+        )
+        return answers
 
     def _parse_string_list(self, content: str) -> list[str]:
         content = content.strip()

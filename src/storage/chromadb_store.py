@@ -58,7 +58,15 @@ class ChromaDBStore(BaseMemoryStore):
                 self._fq_collection.add(
                     ids=[fq.query_id],
                     embeddings=[fq.embedding.tolist()],
-                    metadatas=[{"memory_id": entry.memory_id, "text": fq.text, "answer": fq.answer}],
+                    metadatas=[{
+                        "memory_id": entry.memory_id,
+                        "text": fq.text,
+                        "answer": fq.answer,
+                        "supersedes": fq.supersedes,
+                        "version_seq": fq.version_seq,
+                        "chain_id": fq.chain_id,
+                        "created_at": entry.created_at,
+                    }],
                     documents=[fq.text],
                 )
 
@@ -78,6 +86,8 @@ class ChromaDBStore(BaseMemoryStore):
             "session_text": entry.session_text,
             "fake_query_texts": "|".join(fq.text for fq in entry.fake_queries),
             "fake_query_answers": "|".join(fq.answer for fq in entry.fake_queries),
+            "fake_query_chain_ids": "|".join(fq.chain_id for fq in entry.fake_queries),
+            "fake_query_version_seqs": "|".join(str(fq.version_seq) for fq in entry.fake_queries),
             "created_at": entry.created_at,
         }
         self._meta_collection.upsert(
@@ -198,6 +208,10 @@ class ChromaDBStore(BaseMemoryStore):
                 "score": max(score, 0.0),
                 "text": meta.get("text", ""),
                 "query_id": qid,
+                "answer": meta.get("answer", ""),
+                "chain_id": meta.get("chain_id", ""),
+                "version_seq": meta.get("version_seq", 0),
+                "created_at": meta.get("created_at", ""),
             })
         return hits
 
@@ -254,6 +268,73 @@ class ChromaDBStore(BaseMemoryStore):
             return best_score
         except Exception:
             return 0.0
+
+    def search_all_fake_queries(
+        self,
+        query_embedding: np.ndarray,
+        threshold: float = 0.80,
+        max_results: int = 50,
+    ) -> list[dict]:
+        """Search ALL fake queries, return those above similarity threshold."""
+        count = self._fq_collection.count()
+        if count == 0:
+            return []
+
+        results = self._fq_collection.query(
+            query_embeddings=[query_embedding.tolist()],
+            n_results=min(max_results, count),
+            include=["metadatas", "distances", "documents"],
+        )
+        if not results["ids"] or not results["ids"][0]:
+            return []
+
+        hits = []
+        for i, qid in enumerate(results["ids"][0]):
+            distance = results["distances"][0][i]
+            score = 1.0 - distance
+            if score >= threshold:
+                meta = results["metadatas"][0][i]
+                hits.append({
+                    "query_id": qid,
+                    "memory_id": meta.get("memory_id", ""),
+                    "score": score,
+                    "text": meta.get("text", ""),
+                    "answer": meta.get("answer", ""),
+                    "supersedes": meta.get("supersedes", ""),
+                    "version_seq": meta.get("version_seq", 0),
+                    "chain_id": meta.get("chain_id", ""),
+                    "created_at": meta.get("created_at", ""),
+                })
+        return hits
+
+    def get_chain_nodes(self, chain_id: str) -> list[dict]:
+        """Retrieve all fake query nodes in a version chain, ordered by version_seq."""
+        if not chain_id:
+            return []
+        try:
+            results = self._fq_collection.get(
+                where={"chain_id": chain_id},
+                include=["metadatas", "documents"],
+            )
+            if not results["ids"]:
+                return []
+
+            nodes = []
+            for i, qid in enumerate(results["ids"]):
+                meta = results["metadatas"][i]
+                nodes.append({
+                    "query_id": qid,
+                    "text": meta.get("text", ""),
+                    "answer": meta.get("answer", ""),
+                    "memory_id": meta.get("memory_id", ""),
+                    "version_seq": meta.get("version_seq", 0),
+                    "chain_id": chain_id,
+                    "created_at": meta.get("created_at", ""),
+                })
+            nodes.sort(key=lambda n: n["version_seq"])
+            return nodes
+        except Exception:
+            return []
 
     def _delete_vectors(self, memory_id: str) -> None:
         """Delete all vectors associated with a memory_id."""

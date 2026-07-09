@@ -143,7 +143,8 @@ def _run_query(agent: Q2QAgent, query_text: str) -> None:
     print(f"\n  Retrieved memories ({result['num_results']}):")
     for r in result["results"][:5]:
         print(f"    [{r['final_score']:.4f}] q2q={r['score_q2q']:.4f} q2c={r['score_q2c']:.4f}")
-        print(f"      FQ: {r['matched_fake_query'][:80]}")
+        fq_preview = r['matched_fake_queries'][0][:80] if r.get('matched_fake_queries') else ""
+        print(f"      FQ: {fq_preview}")
         print(f"      Preview: {r['content_preview'][:80]}...")
 
     # Answer
@@ -186,7 +187,8 @@ def cmd_query(agent: Q2QAgent, args: argparse.Namespace) -> None:
     for r in result["results"]:
         print(f"\n  [{r['final_score']:.4f}] {r['memory_id']}")
         print(f"    Q2Q: {r['score_q2q']:.4f} | Q2C: {r['score_q2c']:.4f}")
-        print(f"    Matched FQ: {r['matched_fake_query']}")
+        print(f"    Matched FQs: {r['matched_fake_queries'][:3]}")
+        print(f"    Version Chains: {r.get('version_chains', 0)}")
         print(f"    Preview: {r['content_preview'][:100]}...")
 
     if result.get("answer"):

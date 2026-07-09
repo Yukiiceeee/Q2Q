@@ -5,7 +5,10 @@ import fcntl
 import logging
 from pathlib import Path
 
+import numpy as np
+
 from src.schemas.models import MemoryEntry
+from src.embedding.base import BaseEmbeddingProvider
 from src.storage.base import BaseMemoryStore
 
 logger = logging.getLogger(__name__)
@@ -69,3 +72,53 @@ class JsonMemoryStore(BaseMemoryStore):
     def clear(self) -> None:
         self._write_raw([])
         logger.info("Cleared all memory entries")
+
+    def search_all_fake_queries(
+        self,
+        query_embedding: np.ndarray,
+        threshold: float = 0.80,
+        max_results: int = 50,
+    ) -> list[dict]:
+        """Brute-force search all fake queries above threshold."""
+        entries = self.load_all()
+        hits = []
+        for entry in entries:
+            for fq in entry.fake_queries:
+                if fq.embedding is None:
+                    continue
+                score = float(BaseEmbeddingProvider.cosine_similarity(query_embedding, fq.embedding))
+                if score >= threshold:
+                    hits.append({
+                        "query_id": fq.query_id,
+                        "memory_id": fq.memory_id,
+                        "score": score,
+                        "text": fq.text,
+                        "answer": fq.answer,
+                        "supersedes": fq.supersedes,
+                        "version_seq": fq.version_seq,
+                        "chain_id": fq.chain_id,
+                        "created_at": entry.created_at,
+                    })
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        return hits[:max_results]
+
+    def get_chain_nodes(self, chain_id: str) -> list[dict]:
+        """Get all fake query nodes in a version chain."""
+        if not chain_id:
+            return []
+        entries = self.load_all()
+        nodes = []
+        for entry in entries:
+            for fq in entry.fake_queries:
+                if fq.chain_id == chain_id:
+                    nodes.append({
+                        "query_id": fq.query_id,
+                        "text": fq.text,
+                        "answer": fq.answer,
+                        "memory_id": fq.memory_id,
+                        "version_seq": fq.version_seq,
+                        "chain_id": chain_id,
+                        "created_at": entry.created_at,
+                    })
+        nodes.sort(key=lambda n: n["version_seq"])
+        return nodes
