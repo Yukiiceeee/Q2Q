@@ -81,10 +81,14 @@ class Q2QAgent:
             top_n=config.retrieval.top_n,
             top_k_q2c=config.retrieval.top_k_q2c,
             version_chain_depth=config.retrieval.version_chain_depth,
+            fq_confidence_threshold=config.retrieval.fq_confidence_threshold,
+            paragraph_top_k=config.retrieval.paragraph_top_k,
         )
         self.answerer = Answerer(
             llm_client=self.llm_client,
             language=config.language,
+            max_context_tokens=config.retrieval.max_context_tokens,
+            fq_confidence_threshold=config.retrieval.fq_confidence_threshold,
         )
 
         # Usage tracker
@@ -117,8 +121,10 @@ class Q2QAgent:
         logger.info(f"  Memory ID: {entry.memory_id}")
         logger.info(f"  Fake Queries ({len(entry.fake_queries)}):")
         for i, fq in enumerate(entry.fake_queries):
-            chain_info = f" [chain={fq.chain_id[:8]}, v{fq.version_seq}]" if fq.chain_id else ""
-            logger.info(f"    [{i}] {fq.text}{chain_info}")
+            dag_info = f" [parents={len(fq.parent_ids)}, d{fq.depth}]" if fq.parent_ids else ""
+            logger.info(f"    [{i}] {fq.text}{dag_info}")
+        logger.info(f"  Knowledge Points: {len(entry.knowledge_points)}")
+        logger.info(f"  Paragraphs: {len(entry.paragraphs)}")
         logger.info(f"  Content Chunks: {len(entry.content_embeddings)}")
         logger.info(f"--- Memorize Complete ---")
 

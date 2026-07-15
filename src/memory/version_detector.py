@@ -1,5 +1,4 @@
 from __future__ import annotations
-import uuid
 import logging
 
 import numpy as np
@@ -8,6 +7,8 @@ from src.storage.base import BaseMemoryStore
 from src.embedding.base import BaseEmbeddingProvider
 
 logger = logging.getLogger(__name__)
+
+MAX_PARENT_COUNT = 3
 
 
 class VersionDetector:
@@ -27,14 +28,13 @@ class VersionDetector:
         new_queries: list[str],
         new_embeddings: list[np.ndarray],
     ) -> list[dict]:
-        """For each new fake query, find all existing fake queries above threshold.
+        """For each new fake query, find existing FQs above threshold and build DAG edges.
 
         Returns a parallel list (one per query) of:
         {
-            "related_history": [{"query_id", "text", "answer", "score", "chain_id", "version_seq"}],
-            "chain_id": str,
-            "version_seq": int,
-            "supersedes": str,  # pipe-delimited query_ids
+            "parent_ids": list[str],   # direct parent query_ids (pruned to leaves)
+            "depth": int,              # max parent depth + 1 (0 if no parents)
+            "related_history": [...],  # full hit list for answer generation context
         }
         """
         results = []
@@ -47,31 +47,43 @@ class VersionDetector:
 
             if not hits:
                 results.append({
+                    "parent_ids": [],
+                    "depth": 0,
                     "related_history": [],
-                    "chain_id": uuid.uuid4().hex[:12],
-                    "version_seq": 0,
-                    "supersedes": "",
                 })
-            else:
-                best_hit = max(hits, key=lambda h: h["score"])
-                chain_id = best_hit.get("chain_id") or uuid.uuid4().hex[:12]
-                max_seq = max(h.get("version_seq", 0) for h in hits)
-                supersede_ids = [h["query_id"] for h in hits]
+                continue
 
-                results.append({
-                    "related_history": hits,
-                    "chain_id": chain_id,
-                    "version_seq": max_seq + 1,
-                    "supersedes": "|".join(supersede_ids),
-                })
+            parents = self._prune_to_leaves(hits)
+            parents = sorted(parents, key=lambda h: h["score"], reverse=True)[:MAX_PARENT_COUNT]
 
-                logger.debug(
-                    f"  VersionDetect[{i}]: query=\"{query_text[:50]}\" "
-                    f"-> {len(hits)} hits, chain={chain_id}, seq={max_seq + 1}"
-                )
+            depth = max(h.get("depth", 0) for h in parents) + 1
+            parent_ids = [h["query_id"] for h in parents]
+
+            results.append({
+                "parent_ids": parent_ids,
+                "depth": depth,
+                "related_history": hits,
+            })
+
+            logger.debug(
+                f"  VersionDetect[{i}]: query=\"{query_text[:50]}\" "
+                f"-> {len(hits)} hits, parents={parent_ids}, depth={depth}"
+            )
 
         logger.info(
             f"VersionDetector: {len(new_queries)} queries processed, "
-            f"{sum(1 for r in results if r['related_history'])} with history"
+            f"{sum(1 for r in results if r['parent_ids'])} with parents"
         )
         return results
+
+    def _prune_to_leaves(self, hits: list[dict]) -> list[dict]:
+        """Keep only leaf nodes: if A is an ancestor of B (A.query_id in B.parent_ids), remove A."""
+        hit_ids = {h["query_id"] for h in hits}
+        ancestor_ids: set[str] = set()
+
+        for h in hits:
+            for pid in h.get("parent_ids", []):
+                if pid in hit_ids:
+                    ancestor_ids.add(pid)
+
+        return [h for h in hits if h["query_id"] not in ancestor_ids]

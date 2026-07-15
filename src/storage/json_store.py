@@ -79,7 +79,6 @@ class JsonMemoryStore(BaseMemoryStore):
         threshold: float = 0.80,
         max_results: int = 50,
     ) -> list[dict]:
-        """Brute-force search all fake queries above threshold."""
         entries = self.load_all()
         hits = []
         for entry in entries:
@@ -94,31 +93,63 @@ class JsonMemoryStore(BaseMemoryStore):
                         "score": score,
                         "text": fq.text,
                         "answer": fq.answer,
-                        "supersedes": fq.supersedes,
-                        "version_seq": fq.version_seq,
-                        "chain_id": fq.chain_id,
+                        "parent_ids": fq.parent_ids,
+                        "depth": fq.depth,
                         "created_at": entry.created_at,
                     })
         hits.sort(key=lambda h: h["score"], reverse=True)
         return hits[:max_results]
 
-    def get_chain_nodes(self, chain_id: str) -> list[dict]:
-        """Get all fake query nodes in a version chain."""
-        if not chain_id:
+    def get_fake_query_by_id(self, query_id: str) -> dict | None:
+        entries = self.load_all()
+        for entry in entries:
+            for fq in entry.fake_queries:
+                if fq.query_id == query_id:
+                    return {
+                        "query_id": fq.query_id,
+                        "text": fq.text,
+                        "answer": fq.answer,
+                        "memory_id": fq.memory_id,
+                        "parent_ids": fq.parent_ids,
+                        "depth": fq.depth,
+                        "created_at": entry.created_at,
+                    }
+        return None
+
+    def get_fake_queries_by_ids(self, query_ids: list[str]) -> list[dict]:
+        if not query_ids:
             return []
+        id_set = set(query_ids)
         entries = self.load_all()
         nodes = []
         for entry in entries:
             for fq in entry.fake_queries:
-                if fq.chain_id == chain_id:
+                if fq.query_id in id_set:
                     nodes.append({
                         "query_id": fq.query_id,
                         "text": fq.text,
                         "answer": fq.answer,
                         "memory_id": fq.memory_id,
-                        "version_seq": fq.version_seq,
-                        "chain_id": chain_id,
+                        "parent_ids": fq.parent_ids,
+                        "depth": fq.depth,
                         "created_at": entry.created_at,
                     })
-        nodes.sort(key=lambda n: n["version_seq"])
         return nodes
+
+    def search_paragraphs_for_memory(
+        self,
+        query_embedding: np.ndarray,
+        memory_id: str,
+        top_k: int = 3,
+    ) -> list[dict]:
+        entry = self.get_by_id(memory_id)
+        if not entry or not entry.paragraphs or not entry.paragraph_embeddings:
+            return []
+
+        hits = []
+        for i, (para, emb) in enumerate(zip(entry.paragraphs, entry.paragraph_embeddings)):
+            score = float(BaseEmbeddingProvider.cosine_similarity(query_embedding, emb))
+            hits.append({"score": score, "text": para})
+
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        return hits[:top_k]

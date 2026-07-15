@@ -7,15 +7,39 @@ import numpy as np
 
 
 @dataclass
+class KnowledgePoint:
+    time: str = ""
+    subject: str = ""
+    fact: str = ""
+    entities_or_values: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "time": self.time,
+            "subject": self.subject,
+            "fact": self.fact,
+            "entities_or_values": self.entities_or_values,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> KnowledgePoint:
+        return cls(
+            time=data.get("time", ""),
+            subject=data.get("subject", ""),
+            fact=data.get("fact", ""),
+            entities_or_values=data.get("entities_or_values", ""),
+        )
+
+
+@dataclass
 class FakeQuery:
     text: str
     answer: str = ""
     embedding: Optional[np.ndarray] = None
     query_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     memory_id: str = ""
-    supersedes: str = ""
-    version_seq: int = 0
-    chain_id: str = ""
+    parent_ids: list[str] = field(default_factory=list)
+    depth: int = 0
 
 
 @dataclass
@@ -24,6 +48,9 @@ class MemoryEntry:
     session_text: str = ""
     content_embeddings: list[np.ndarray] = field(default_factory=list)
     fake_queries: list[FakeQuery] = field(default_factory=list)
+    knowledge_points: list[KnowledgePoint] = field(default_factory=list)
+    paragraphs: list[str] = field(default_factory=list)
+    paragraph_embeddings: list[np.ndarray] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -39,12 +66,14 @@ class MemoryEntry:
                     "answer": fq.answer,
                     "memory_id": fq.memory_id,
                     "embedding": fq.embedding.tolist() if fq.embedding is not None else None,
-                    "supersedes": fq.supersedes,
-                    "version_seq": fq.version_seq,
-                    "chain_id": fq.chain_id,
+                    "parent_ids": fq.parent_ids,
+                    "depth": fq.depth,
                 }
                 for fq in self.fake_queries
             ],
+            "knowledge_points": [kp.to_dict() for kp in self.knowledge_points],
+            "paragraphs": self.paragraphs,
+            "paragraph_embeddings": [e.tolist() for e in self.paragraph_embeddings],
             "metadata": self.metadata,
             "created_at": self.created_at,
         }
@@ -66,11 +95,16 @@ class MemoryEntry:
                 embedding=emb,
                 query_id=fq_data.get("query_id", uuid.uuid4().hex[:12]),
                 memory_id=fq_data.get("memory_id", entry.memory_id),
-                supersedes=fq_data.get("supersedes", ""),
-                version_seq=fq_data.get("version_seq", 0),
-                chain_id=fq_data.get("chain_id", ""),
+                parent_ids=fq_data.get("parent_ids", []),
+                depth=fq_data.get("depth", 0),
             )
             entry.fake_queries.append(fq)
+        for kp_data in data.get("knowledge_points", []):
+            entry.knowledge_points.append(KnowledgePoint.from_dict(kp_data))
+        entry.paragraphs = data.get("paragraphs", [])
+        entry.paragraph_embeddings = [
+            np.array(e) for e in data.get("paragraph_embeddings", [])
+        ]
         return entry
 
 
@@ -78,9 +112,10 @@ class MemoryEntry:
 class VersionChainNode:
     query_id: str
     text: str
-    answer: str
-    memory_id: str
-    version_seq: int
+    answer: str = ""
+    memory_id: str = ""
+    depth: int = 0
+    parent_ids: list[str] = field(default_factory=list)
     created_at: str = ""
 
 
@@ -101,6 +136,7 @@ class RetrievalResult:
     matched_fake_queries: list[str] = field(default_factory=list)
     matched_sub_queries: list[str] = field(default_factory=list)
     version_chain_context: list[list[VersionChainNode]] = field(default_factory=list)
+    matched_paragraphs: list[str] = field(default_factory=list)
 
 
 @dataclass

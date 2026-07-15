@@ -1,17 +1,17 @@
 from __future__ import annotations
+import json
 import logging
 import uuid
 from pathlib import Path
 import numpy as np
 
-from src.schemas.models import MemoryEntry, FakeQuery
+from src.schemas.models import MemoryEntry, FakeQuery, KnowledgePoint
 from src.storage.base import BaseMemoryStore
 
 logger = logging.getLogger(__name__)
 
 
 class ChromaDBStore(BaseMemoryStore):
-    """ChromaDB-based memory store with native vector search."""
 
     def __init__(
         self,
@@ -25,19 +25,21 @@ class ChromaDBStore(BaseMemoryStore):
 
         self._client = chromadb.PersistentClient(path=str(self.persist_directory))
 
-        # Collection for fake queries (primary search target)
         self._fq_collection = self._client.get_or_create_collection(
             name=f"{collection_name}_fake_queries",
             metadata={"hnsw:space": "cosine"},
         )
 
-        # Collection for content chunks
         self._content_collection = self._client.get_or_create_collection(
             name=f"{collection_name}_content",
             metadata={"hnsw:space": "cosine"},
         )
 
-        # Collection for memory metadata (stores full MemoryEntry without embeddings)
+        self._paragraph_collection = self._client.get_or_create_collection(
+            name=f"{collection_name}_paragraphs",
+            metadata={"hnsw:space": "cosine"},
+        )
+
         self._meta_collection = self._client.get_or_create_collection(
             name=f"{collection_name}_meta",
         )
@@ -45,11 +47,11 @@ class ChromaDBStore(BaseMemoryStore):
         logger.info(
             f"ChromaDB initialized: {persist_directory}, "
             f"fake_queries={self._fq_collection.count()}, "
-            f"content_chunks={self._content_collection.count()}"
+            f"content_chunks={self._content_collection.count()}, "
+            f"paragraphs={self._paragraph_collection.count()}"
         )
 
     def save(self, entry: MemoryEntry) -> None:
-        # Delete existing entry if updating
         self._delete_vectors(entry.memory_id)
 
         # Store fake query embeddings
@@ -61,10 +63,9 @@ class ChromaDBStore(BaseMemoryStore):
                     metadatas=[{
                         "memory_id": entry.memory_id,
                         "text": fq.text,
-                        "answer": fq.answer,
-                        "supersedes": fq.supersedes,
-                        "version_seq": fq.version_seq,
-                        "chain_id": fq.chain_id,
+                        "answer": "",
+                        "parent_ids": ",".join(fq.parent_ids),
+                        "depth": fq.depth,
                         "created_at": entry.created_at,
                     }],
                     documents=[fq.text],
@@ -77,17 +78,32 @@ class ChromaDBStore(BaseMemoryStore):
                 ids=[chunk_id],
                 embeddings=[emb.tolist()],
                 metadatas=[{"memory_id": entry.memory_id, "chunk_index": i}],
-                documents=[entry.session_text[:500]],  # truncated for metadata
+                documents=[entry.session_text[:500]],
             )
 
-        # Store full memory entry (without embedding data for space efficiency)
+        # Store paragraph embeddings
+        for i, (para, emb) in enumerate(zip(entry.paragraphs, entry.paragraph_embeddings)):
+            para_id = f"{entry.memory_id}_para_{i}"
+            self._paragraph_collection.add(
+                ids=[para_id],
+                embeddings=[emb.tolist()],
+                metadatas=[{"memory_id": entry.memory_id, "paragraph_index": i}],
+                documents=[para[:500]],
+            )
+
+        # Store metadata with knowledge points
+        kp_json = json.dumps(
+            [kp.to_dict() for kp in entry.knowledge_points], ensure_ascii=False
+        )
+        paragraphs_json = json.dumps(entry.paragraphs, ensure_ascii=False)
+
         meta_dict = {
             "memory_id": entry.memory_id,
             "session_text": entry.session_text,
             "fake_query_texts": "|".join(fq.text for fq in entry.fake_queries),
-            "fake_query_answers": "|".join(fq.answer for fq in entry.fake_queries),
-            "fake_query_chain_ids": "|".join(fq.chain_id for fq in entry.fake_queries),
-            "fake_query_version_seqs": "|".join(str(fq.version_seq) for fq in entry.fake_queries),
+            "fake_query_ids": "|".join(fq.query_id for fq in entry.fake_queries),
+            "knowledge_points_json": kp_json,
+            "paragraphs_json": paragraphs_json,
             "created_at": entry.created_at,
         }
         self._meta_collection.upsert(
@@ -99,7 +115,8 @@ class ChromaDBStore(BaseMemoryStore):
 
         logger.info(
             f"ChromaDB saved: {entry.memory_id} | "
-            f"{len(entry.fake_queries)} queries, {len(entry.content_embeddings)} chunks"
+            f"{len(entry.fake_queries)} queries, {len(entry.content_embeddings)} chunks, "
+            f"{len(entry.knowledge_points)} kps, {len(entry.paragraphs)} paragraphs"
         )
 
     def load_all(self) -> list[MemoryEntry]:
@@ -107,23 +124,7 @@ class ChromaDBStore(BaseMemoryStore):
         entries = []
         for i, mid in enumerate(result["ids"]):
             meta = result["metadatas"][i]
-            entry = MemoryEntry(
-                memory_id=meta["memory_id"],
-                session_text=meta.get("session_text", ""),
-                created_at=meta.get("created_at", ""),
-            )
-            # Reconstruct fake queries (text + answer, embeddings loaded on demand)
-            fq_texts = meta.get("fake_query_texts", "")
-            fq_answers = meta.get("fake_query_answers", "")
-            if fq_texts:
-                texts = fq_texts.split("|")
-                answers = fq_answers.split("|") if fq_answers else []
-                for j, text in enumerate(texts):
-                    if text.strip():
-                        answer = answers[j].strip() if j < len(answers) else ""
-                        entry.fake_queries.append(
-                            FakeQuery(text=text.strip(), answer=answer, memory_id=mid)
-                        )
+            entry = self._reconstruct_entry(meta, mid)
             entries.append(entry)
         return entries
 
@@ -132,22 +133,38 @@ class ChromaDBStore(BaseMemoryStore):
         if not result["ids"]:
             return None
         meta = result["metadatas"][0]
+        return self._reconstruct_entry(meta, memory_id)
+
+    def _reconstruct_entry(self, meta: dict, memory_id: str) -> MemoryEntry:
         entry = MemoryEntry(
             memory_id=meta["memory_id"],
             session_text=meta.get("session_text", ""),
             created_at=meta.get("created_at", ""),
         )
+        # Reconstruct fake queries
         fq_texts = meta.get("fake_query_texts", "")
-        fq_answers = meta.get("fake_query_answers", "")
         if fq_texts:
             texts = fq_texts.split("|")
-            answers = fq_answers.split("|") if fq_answers else []
-            for j, text in enumerate(texts):
+            for text in texts:
                 if text.strip():
-                    answer = answers[j].strip() if j < len(answers) else ""
                     entry.fake_queries.append(
-                        FakeQuery(text=text.strip(), answer=answer, memory_id=memory_id)
+                        FakeQuery(text=text.strip(), answer="", memory_id=memory_id)
                     )
+        # Reconstruct knowledge points
+        kp_json = meta.get("knowledge_points_json", "")
+        if kp_json:
+            try:
+                kp_list = json.loads(kp_json)
+                entry.knowledge_points = [KnowledgePoint.from_dict(kp) for kp in kp_list]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Reconstruct paragraphs
+        para_json = meta.get("paragraphs_json", "")
+        if para_json:
+            try:
+                entry.paragraphs = json.loads(para_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
         return entry
 
     def delete(self, memory_id: str) -> bool:
@@ -163,14 +180,15 @@ class ChromaDBStore(BaseMemoryStore):
         return self._meta_collection.count()
 
     def clear(self) -> None:
-        # Recreate collections
         client = self._client
         fq_name = self._fq_collection.name
         content_name = self._content_collection.name
+        para_name = self._paragraph_collection.name
         meta_name = self._meta_collection.name
 
         client.delete_collection(fq_name)
         client.delete_collection(content_name)
+        client.delete_collection(para_name)
         client.delete_collection(meta_name)
 
         self._fq_collection = client.get_or_create_collection(
@@ -179,17 +197,19 @@ class ChromaDBStore(BaseMemoryStore):
         self._content_collection = client.get_or_create_collection(
             name=content_name, metadata={"hnsw:space": "cosine"}
         )
+        self._paragraph_collection = client.get_or_create_collection(
+            name=para_name, metadata={"hnsw:space": "cosine"}
+        )
         self._meta_collection = client.get_or_create_collection(name=meta_name)
         logger.info("ChromaDB cleared all collections")
 
-    # --- Vector search methods (used by DualRetriever) ---
+    # --- Vector search methods ---
 
     def search_fake_queries(
         self,
         query_embedding: np.ndarray,
         top_k: int = 10,
     ) -> list[dict]:
-        """Search fake query vectors, return [{memory_id, score, text}, ...]"""
         results = self._fq_collection.query(
             query_embeddings=[query_embedding.tolist()],
             n_results=min(top_k, self._fq_collection.count() or 1),
@@ -201,16 +221,17 @@ class ChromaDBStore(BaseMemoryStore):
         hits = []
         for i, qid in enumerate(results["ids"][0]):
             distance = results["distances"][0][i]
-            score = 1.0 - distance  # chromadb cosine distance -> similarity
+            score = 1.0 - distance
             meta = results["metadatas"][0][i]
+            parent_ids_str = meta.get("parent_ids", "")
             hits.append({
                 "memory_id": meta["memory_id"],
                 "score": max(score, 0.0),
                 "text": meta.get("text", ""),
                 "query_id": qid,
-                "answer": meta.get("answer", ""),
-                "chain_id": meta.get("chain_id", ""),
-                "version_seq": meta.get("version_seq", 0),
+                "answer": "",
+                "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
+                "depth": meta.get("depth", 0),
                 "created_at": meta.get("created_at", ""),
             })
         return hits
@@ -220,7 +241,6 @@ class ChromaDBStore(BaseMemoryStore):
         query_embedding: np.ndarray,
         top_k: int = 10,
     ) -> list[dict]:
-        """Search content chunk vectors, return [{memory_id, score, chunk_index}, ...]"""
         results = self._content_collection.query(
             query_embeddings=[query_embedding.tolist()],
             n_results=min(top_k, self._content_collection.count() or 1),
@@ -247,7 +267,6 @@ class ChromaDBStore(BaseMemoryStore):
         memory_id: str,
         top_k: int = 3,
     ) -> float:
-        """Search content chunks belonging to a specific memory_id, return best score."""
         try:
             count = self._content_collection.count()
             if count == 0:
@@ -269,13 +288,43 @@ class ChromaDBStore(BaseMemoryStore):
         except Exception:
             return 0.0
 
+    def search_paragraphs_for_memory(
+        self,
+        query_embedding: np.ndarray,
+        memory_id: str,
+        top_k: int = 3,
+    ) -> list[dict]:
+        try:
+            count = self._paragraph_collection.count()
+            if count == 0:
+                return []
+            results = self._paragraph_collection.query(
+                query_embeddings=[query_embedding.tolist()],
+                n_results=min(top_k * 5, count),
+                where={"memory_id": memory_id},
+                include=["distances", "documents"],
+            )
+            if not results["ids"] or not results["ids"][0]:
+                return []
+
+            hits = []
+            for i, pid in enumerate(results["ids"][0]):
+                distance = results["distances"][0][i]
+                score = max(1.0 - distance, 0.0)
+                text = results["documents"][0][i] if results["documents"] else ""
+                hits.append({"score": score, "text": text})
+
+            hits.sort(key=lambda h: h["score"], reverse=True)
+            return hits[:top_k]
+        except Exception:
+            return []
+
     def search_all_fake_queries(
         self,
         query_embedding: np.ndarray,
         threshold: float = 0.80,
         max_results: int = 50,
     ) -> list[dict]:
-        """Search ALL fake queries, return those above similarity threshold."""
         count = self._fq_collection.count()
         if count == 0:
             return []
@@ -294,51 +343,63 @@ class ChromaDBStore(BaseMemoryStore):
             score = 1.0 - distance
             if score >= threshold:
                 meta = results["metadatas"][0][i]
+                parent_ids_str = meta.get("parent_ids", "")
                 hits.append({
                     "query_id": qid,
                     "memory_id": meta.get("memory_id", ""),
                     "score": score,
                     "text": meta.get("text", ""),
-                    "answer": meta.get("answer", ""),
-                    "supersedes": meta.get("supersedes", ""),
-                    "version_seq": meta.get("version_seq", 0),
-                    "chain_id": meta.get("chain_id", ""),
+                    "answer": "",
+                    "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
+                    "depth": meta.get("depth", 0),
                     "created_at": meta.get("created_at", ""),
                 })
         return hits
 
-    def get_chain_nodes(self, chain_id: str) -> list[dict]:
-        """Retrieve all fake query nodes in a version chain, ordered by version_seq."""
-        if not chain_id:
+    def get_fake_query_by_id(self, query_id: str) -> dict | None:
+        try:
+            results = self._fq_collection.get(ids=[query_id], include=["metadatas"])
+            if not results["ids"]:
+                return None
+            meta = results["metadatas"][0]
+            parent_ids_str = meta.get("parent_ids", "")
+            return {
+                "query_id": query_id,
+                "text": meta.get("text", ""),
+                "answer": "",
+                "memory_id": meta.get("memory_id", ""),
+                "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
+                "depth": meta.get("depth", 0),
+                "created_at": meta.get("created_at", ""),
+            }
+        except Exception:
+            return None
+
+    def get_fake_queries_by_ids(self, query_ids: list[str]) -> list[dict]:
+        if not query_ids:
             return []
         try:
-            results = self._fq_collection.get(
-                where={"chain_id": chain_id},
-                include=["metadatas", "documents"],
-            )
+            results = self._fq_collection.get(ids=query_ids, include=["metadatas"])
             if not results["ids"]:
                 return []
-
             nodes = []
             for i, qid in enumerate(results["ids"]):
                 meta = results["metadatas"][i]
+                parent_ids_str = meta.get("parent_ids", "")
                 nodes.append({
                     "query_id": qid,
                     "text": meta.get("text", ""),
-                    "answer": meta.get("answer", ""),
+                    "answer": "",
                     "memory_id": meta.get("memory_id", ""),
-                    "version_seq": meta.get("version_seq", 0),
-                    "chain_id": chain_id,
+                    "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
+                    "depth": meta.get("depth", 0),
                     "created_at": meta.get("created_at", ""),
                 })
-            nodes.sort(key=lambda n: n["version_seq"])
             return nodes
         except Exception:
             return []
 
     def _delete_vectors(self, memory_id: str) -> None:
-        """Delete all vectors associated with a memory_id."""
-        # Delete fake queries
         try:
             fq_results = self._fq_collection.get(
                 where={"memory_id": memory_id}, include=["metadatas"]
@@ -348,12 +409,20 @@ class ChromaDBStore(BaseMemoryStore):
         except Exception:
             pass
 
-        # Delete content chunks
         try:
             content_results = self._content_collection.get(
                 where={"memory_id": memory_id}, include=["metadatas"]
             )
             if content_results["ids"]:
                 self._content_collection.delete(ids=content_results["ids"])
+        except Exception:
+            pass
+
+        try:
+            para_results = self._paragraph_collection.get(
+                where={"memory_id": memory_id}, include=["metadatas"]
+            )
+            if para_results["ids"]:
+                self._paragraph_collection.delete(ids=para_results["ids"])
         except Exception:
             pass

@@ -34,6 +34,9 @@ class RetrievalConfig:
     num_fake_queries: int = 10
     version_threshold: float = 0.80
     version_chain_depth: int = 3
+    max_context_tokens: int = 10000
+    fq_confidence_threshold: float = 0.80
+    paragraph_top_k: int = 3
 
 
 @dataclass

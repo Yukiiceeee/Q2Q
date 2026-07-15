@@ -39,5 +39,15 @@ class BaseMemoryStore(ABC):
         ...
 
     @abstractmethod
-    def get_chain_nodes(self, chain_id: str) -> list[dict]:
+    def get_fake_query_by_id(self, query_id: str) -> dict | None:
+        ...
+
+    @abstractmethod
+    def get_fake_queries_by_ids(self, query_ids: list[str]) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def search_paragraphs_for_memory(
+        self, query_embedding: np.ndarray, memory_id: str, top_k: int = 3
+    ) -> list[dict]:
         ...

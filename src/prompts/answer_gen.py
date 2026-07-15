@@ -10,10 +10,10 @@ ANSWER_GEN_PROMPT_EN = """You are a helpful assistant with access to the user's 
 {raw_query}
 
 ## Instructions
-1. Answer the question using information from the retrieved memories when relevant.
+1. Answer the question using ONLY information from the retrieved memories.
 2. If the memories contain directly relevant information, cite it naturally in your answer.
-3. If the memories are only partially relevant, use them as context but rely on your own knowledge to fill gaps.
-4. If none of the memories are relevant, answer based on your own knowledge and note that no relevant past conversations were found.
+3. If the memories are only partially relevant, answer only the part that is supported by memory evidence.
+4. If none of the memories contain information that directly answers the question, respond with "Not mentioned" or "No information available" — do NOT guess or infer from general knowledge.
 5. Be concise and direct."""
 
 
@@ -29,10 +29,10 @@ ANSWER_GEN_PROMPT_ZH = """你是一个拥有用户过往对话记忆的智能助
 {raw_query}
 
 ## 指令
-1. 利用检索到的记忆中的信息回答问题。
+1. 仅使用检索到的记忆中的信息回答问题。
 2. 如果记忆中包含直接相关的信息，在回答中自然地引用。
-3. 如果记忆仅部分相关，将其作为背景参考，同时用自身知识补充。
-4. 如果没有相关记忆，基于自身知识回答，并说明未找到相关的历史对话记录。
+3. 如果记忆仅部分相关，只回答有记忆证据支持的部分。
+4. 如果检索到的记忆中没有能直接回答该问题的信息，明确回答"未提及"或"没有相关记录"——绝不要根据推测或常识编造答案。
 5. 回答要简洁直接。"""
 
 
