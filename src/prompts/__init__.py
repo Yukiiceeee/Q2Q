@@ -18,6 +18,14 @@ from src.prompts.answer_gen import (
     ANSWER_GEN_PROMPT_ZH,
     build_answer_gen_prompt,
 )
+from src.prompts.knowledge_extraction import (
+    KNOWLEDGE_EXTRACTION_PROMPT_EN,
+    KNOWLEDGE_EXTRACTION_PROMPT_ZH,
+    KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_EN,
+    KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_ZH,
+    build_knowledge_extraction_prompt,
+    build_knowledge_extraction_with_context_prompt,
+)
 
 __all__ = [
     "FAKE_QUERY_GEN_PROMPT_EN",
@@ -32,4 +40,10 @@ __all__ = [
     "ANSWER_GEN_PROMPT_EN",
     "ANSWER_GEN_PROMPT_ZH",
     "build_answer_gen_prompt",
+    "KNOWLEDGE_EXTRACTION_PROMPT_EN",
+    "KNOWLEDGE_EXTRACTION_PROMPT_ZH",
+    "KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_EN",
+    "KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_ZH",
+    "build_knowledge_extraction_prompt",
+    "build_knowledge_extraction_with_context_prompt",
 ]
