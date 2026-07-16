@@ -153,3 +153,22 @@ class JsonMemoryStore(BaseMemoryStore):
 
         hits.sort(key=lambda h: h["score"], reverse=True)
         return hits[:top_k]
+
+    def search_kps_for_memory(
+        self,
+        query_embedding: np.ndarray,
+        memory_id: str,
+        top_k: int = 10,
+    ) -> list[dict]:
+        entry = self.get_by_id(memory_id)
+        if not entry or not entry.knowledge_points or not entry.kp_embeddings:
+            return []
+
+        hits = []
+        for i, (kp, emb) in enumerate(zip(entry.knowledge_points, entry.kp_embeddings)):
+            score = float(BaseEmbeddingProvider.cosine_similarity(query_embedding, emb))
+            kp_text = f"[{kp.time}] {kp.subject}: {kp.fact} ({kp.entities_or_values})"
+            hits.append({"score": score, "kp_index": i, "text": kp_text})
+
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        return hits[:top_k]

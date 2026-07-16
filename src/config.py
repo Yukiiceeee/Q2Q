@@ -37,6 +37,7 @@ class RetrievalConfig:
     max_context_tokens: int = 10000
     fq_confidence_threshold: float = 0.80
     paragraph_top_k: int = 3
+    kp_top_k: int = 10
 
 
 @dataclass

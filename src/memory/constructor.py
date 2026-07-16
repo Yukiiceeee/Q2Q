@@ -8,10 +8,13 @@ from src.memory.query_generator import FakeQueryGenerator
 from src.memory.version_detector import VersionDetector
 from src.storage.base import BaseMemoryStore
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 PARAGRAPH_MIN_CHARS = 50
 PARAGRAPH_MAX_CHARS = 500
+LINKED_KP_TOP_K = 10
 
 
 class MemoryConstructor:
@@ -55,7 +58,9 @@ class MemoryConstructor:
 
         # Step 4: LLM Call 2 - extract knowledge points (replaces answer generation)
         if version_histories:
-            linked_kps = self._gather_linked_knowledge_points(version_histories)
+            linked_kps = self._gather_linked_knowledge_points(
+                version_histories, query_only_embeddings
+            )
             if linked_kps:
                 kp_dicts = self.query_generator.extract_knowledge_points_with_context(
                     session_text, linked_kps
@@ -67,6 +72,15 @@ class MemoryConstructor:
 
         entry.knowledge_points = [KnowledgePoint.from_dict(kp) for kp in kp_dicts]
         logger.info(f"Step 4: Extracted {len(entry.knowledge_points)} knowledge points")
+
+        # Step 4.5: Embed knowledge points for query-aware reranking
+        if entry.knowledge_points:
+            kp_texts = [
+                f"[{kp.time}] {kp.subject}: {kp.fact} ({kp.entities_or_values})"
+                for kp in entry.knowledge_points
+            ]
+            entry.kp_embeddings = self.embedding_provider.embed_batch(kp_texts)
+            logger.info(f"Step 4.5: Computed {len(entry.kp_embeddings)} KP embeddings")
 
         # Step 5: Final embeddings - query text only (no answer concatenation)
         final_embeddings = query_only_embeddings
@@ -113,9 +127,11 @@ class MemoryConstructor:
         )
         return entry
 
-    def _gather_linked_knowledge_points(self, version_histories: list[dict]) -> list[dict]:
+    def _gather_linked_knowledge_points(
+        self, version_histories: list[dict], query_embeddings: list[np.ndarray]
+    ) -> list[dict]:
         seen_memory_ids = set()
-        linked_kps = []
+        all_kp_candidates: list[tuple[dict, np.ndarray]] = []
 
         for vh in version_histories:
             if not vh.get("related_history"):
@@ -125,11 +141,35 @@ class MemoryConstructor:
                 if mid and mid not in seen_memory_ids:
                     seen_memory_ids.add(mid)
                     mem = self.memory_store.get_by_id(mid)
-                    if mem and mem.knowledge_points:
+                    if mem and mem.knowledge_points and mem.kp_embeddings:
+                        for kp, emb in zip(mem.knowledge_points, mem.kp_embeddings):
+                            all_kp_candidates.append((kp.to_dict(), emb))
+                    elif mem and mem.knowledge_points:
                         for kp in mem.knowledge_points:
-                            linked_kps.append(kp.to_dict())
+                            all_kp_candidates.append((kp.to_dict(), None))
 
-        return linked_kps
+        if not all_kp_candidates:
+            return []
+
+        # Rank by max cosine similarity to any query embedding
+        scored_kps: list[tuple[float, dict]] = []
+        for kp_dict, kp_emb in all_kp_candidates:
+            if kp_emb is None or not query_embeddings:
+                scored_kps.append((0.0, kp_dict))
+                continue
+            best_sim = max(
+                float(BaseEmbeddingProvider.cosine_similarity(q_emb, kp_emb))
+                for q_emb in query_embeddings
+            )
+            scored_kps.append((best_sim, kp_dict))
+
+        scored_kps.sort(key=lambda x: x[0], reverse=True)
+        top_kps = [kp_dict for _, kp_dict in scored_kps[:LINKED_KP_TOP_K]]
+
+        logger.info(
+            f"Linked KPs: {len(all_kp_candidates)} candidates -> top {len(top_kps)} selected"
+        )
+        return top_kps
 
     def _split_into_paragraphs(self, session_text: str) -> list[str]:
         segments = re.split(r'\n{2,}', session_text)

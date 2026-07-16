@@ -49,6 +49,7 @@ class MemoryEntry:
     content_embeddings: list[np.ndarray] = field(default_factory=list)
     fake_queries: list[FakeQuery] = field(default_factory=list)
     knowledge_points: list[KnowledgePoint] = field(default_factory=list)
+    kp_embeddings: list[np.ndarray] = field(default_factory=list)
     paragraphs: list[str] = field(default_factory=list)
     paragraph_embeddings: list[np.ndarray] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
@@ -72,6 +73,7 @@ class MemoryEntry:
                 for fq in self.fake_queries
             ],
             "knowledge_points": [kp.to_dict() for kp in self.knowledge_points],
+            "kp_embeddings": [e.tolist() for e in self.kp_embeddings],
             "paragraphs": self.paragraphs,
             "paragraph_embeddings": [e.tolist() for e in self.paragraph_embeddings],
             "metadata": self.metadata,
@@ -101,6 +103,9 @@ class MemoryEntry:
             entry.fake_queries.append(fq)
         for kp_data in data.get("knowledge_points", []):
             entry.knowledge_points.append(KnowledgePoint.from_dict(kp_data))
+        entry.kp_embeddings = [
+            np.array(e) for e in data.get("kp_embeddings", [])
+        ]
         entry.paragraphs = data.get("paragraphs", [])
         entry.paragraph_embeddings = [
             np.array(e) for e in data.get("paragraph_embeddings", [])
