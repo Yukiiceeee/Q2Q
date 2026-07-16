@@ -51,3 +51,9 @@ class BaseMemoryStore(ABC):
         self, query_embedding: np.ndarray, memory_id: str, top_k: int = 3
     ) -> list[dict]:
         ...
+
+    @abstractmethod
+    def search_kps_for_memory(
+        self, query_embedding: np.ndarray, memory_id: str, top_k: int = 10
+    ) -> list[dict]:
+        ...

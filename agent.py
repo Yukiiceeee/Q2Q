@@ -89,6 +89,7 @@ class Q2QAgent:
             language=config.language,
             max_context_tokens=config.retrieval.max_context_tokens,
             fq_confidence_threshold=config.retrieval.fq_confidence_threshold,
+            kp_top_k=config.retrieval.kp_top_k,
         )
 
         # Usage tracker
@@ -164,7 +165,7 @@ class Q2QAgent:
         # Step 3: generate answer (optional)
         answer = ""
         if return_answer and results:
-            answer = self.answerer.answer(raw_query, results, history)
+            answer = self.answerer.answer(raw_query, results, history, sub_queries)
             logger.info(f"  Answer generated ({len(answer)} chars)")
 
         response = {

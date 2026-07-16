@@ -40,6 +40,11 @@ class ChromaDBStore(BaseMemoryStore):
             metadata={"hnsw:space": "cosine"},
         )
 
+        self._kp_collection = self._client.get_or_create_collection(
+            name=f"{collection_name}_knowledge_points",
+            metadata={"hnsw:space": "cosine"},
+        )
+
         self._meta_collection = self._client.get_or_create_collection(
             name=f"{collection_name}_meta",
         )
@@ -89,6 +94,17 @@ class ChromaDBStore(BaseMemoryStore):
                 embeddings=[emb.tolist()],
                 metadatas=[{"memory_id": entry.memory_id, "paragraph_index": i}],
                 documents=[para[:500]],
+            )
+
+        # Store knowledge point embeddings
+        for i, (kp, emb) in enumerate(zip(entry.knowledge_points, entry.kp_embeddings)):
+            kp_id = f"{entry.memory_id}_kp_{i}"
+            kp_text = f"[{kp.time}] {kp.subject}: {kp.fact} ({kp.entities_or_values})"
+            self._kp_collection.add(
+                ids=[kp_id],
+                embeddings=[emb.tolist()],
+                metadatas=[{"memory_id": entry.memory_id, "kp_index": i}],
+                documents=[kp_text[:500]],
             )
 
         # Store metadata with knowledge points
@@ -184,11 +200,13 @@ class ChromaDBStore(BaseMemoryStore):
         fq_name = self._fq_collection.name
         content_name = self._content_collection.name
         para_name = self._paragraph_collection.name
+        kp_name = self._kp_collection.name
         meta_name = self._meta_collection.name
 
         client.delete_collection(fq_name)
         client.delete_collection(content_name)
         client.delete_collection(para_name)
+        client.delete_collection(kp_name)
         client.delete_collection(meta_name)
 
         self._fq_collection = client.get_or_create_collection(
@@ -199,6 +217,9 @@ class ChromaDBStore(BaseMemoryStore):
         )
         self._paragraph_collection = client.get_or_create_collection(
             name=para_name, metadata={"hnsw:space": "cosine"}
+        )
+        self._kp_collection = client.get_or_create_collection(
+            name=kp_name, metadata={"hnsw:space": "cosine"}
         )
         self._meta_collection = client.get_or_create_collection(name=meta_name)
         logger.info("ChromaDB cleared all collections")
@@ -319,6 +340,41 @@ class ChromaDBStore(BaseMemoryStore):
         except Exception:
             return []
 
+    def search_kps_for_memory(
+        self,
+        query_embedding: np.ndarray,
+        memory_id: str,
+        top_k: int = 10,
+    ) -> list[dict]:
+        try:
+            count = self._kp_collection.count()
+            if count == 0:
+                return []
+            results = self._kp_collection.query(
+                query_embeddings=[query_embedding.tolist()],
+                n_results=min(top_k * 5, count),
+                where={"memory_id": memory_id},
+                include=["distances", "metadatas", "documents"],
+            )
+            if not results["ids"] or not results["ids"][0]:
+                return []
+
+            hits = []
+            for i, kid in enumerate(results["ids"][0]):
+                distance = results["distances"][0][i]
+                score = max(1.0 - distance, 0.0)
+                meta = results["metadatas"][0][i]
+                hits.append({
+                    "score": score,
+                    "kp_index": meta.get("kp_index", 0),
+                    "text": results["documents"][0][i] if results["documents"] else "",
+                })
+
+            hits.sort(key=lambda h: h["score"], reverse=True)
+            return hits[:top_k]
+        except Exception:
+            return []
+
     def search_all_fake_queries(
         self,
         query_embedding: np.ndarray,
@@ -424,5 +480,14 @@ class ChromaDBStore(BaseMemoryStore):
             )
             if para_results["ids"]:
                 self._paragraph_collection.delete(ids=para_results["ids"])
+        except Exception:
+            pass
+
+        try:
+            kp_results = self._kp_collection.get(
+                where={"memory_id": memory_id}, include=["metadatas"]
+            )
+            if kp_results["ids"]:
+                self._kp_collection.delete(ids=kp_results["ids"])
         except Exception:
             pass
