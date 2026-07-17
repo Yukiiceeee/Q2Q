@@ -382,10 +382,31 @@ class DualRetriever:
     def _enrich_low_confidence_results(
         self, results: list[RetrievalResult], sub_queries: list[SubQuery]
     ) -> None:
-        for r in results:
-            if r.score_q2q >= self.fq_confidence_threshold:
-                continue
+        """Enrich results with paragraph-level matches.
 
+        Paragraph enrichment is only activated when ALL results have
+        final_score below the confidence threshold (global condition).
+        """
+        if not results:
+            return
+
+        all_below_threshold = all(
+            r.final_score < self.fq_confidence_threshold for r in results
+        )
+
+        if not all_below_threshold:
+            logger.info(
+                f"  At least one result has final_score >= {self.fq_confidence_threshold}, "
+                f"paragraph enrichment skipped for all {len(results)} results"
+            )
+            return
+
+        logger.info(
+            f"  All {len(results)} results have final_score < {self.fq_confidence_threshold}, "
+            f"enriching all with paragraphs"
+        )
+
+        for r in results:
             best_paragraphs: dict[str, float] = {}
             for sq in sub_queries:
                 if sq.embedding is None:
@@ -403,7 +424,12 @@ class DualRetriever:
             r.matched_paragraphs = [text for text, _ in sorted_paras[:self.paragraph_top_k]]
 
             if r.matched_paragraphs:
-                logger.debug(
+                logger.info(
                     f"  Enriched memory {r.memory.memory_id[:12]} with "
-                    f"{len(r.matched_paragraphs)} paragraphs (low confidence path)"
+                    f"{len(r.matched_paragraphs)} paragraphs (final_score={r.final_score:.4f})"
+                )
+            else:
+                logger.info(
+                    f"  No paragraphs found for memory {r.memory.memory_id[:12]} "
+                    f"(final_score={r.final_score:.4f})"
                 )

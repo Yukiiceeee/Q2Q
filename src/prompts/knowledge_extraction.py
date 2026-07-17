@@ -1,28 +1,26 @@
 import json
 
 
-KNOWLEDGE_EXTRACTION_PROMPT_ZH = """你是一个精确的医疗知识提取助手。给定一段医疗对话记录，从中提取所有离散的知识点。
+KNOWLEDGE_EXTRACTION_PROMPT_ZH = """你是一个精确的知识提取助手。给定一段对话记录，从中提取所有离散的知识点。
 
 ## 知识点格式
 每个知识点必须包含以下四个字段：
-- **time**: 事件发生的时间（精确到日期，如 "2024-01-15"；若无法确定具体日期则写时间范围或阶段）
-- **subject**: 知识点的主体/角色（如 "患者"、"医生"、"检查结果"、"用药方案" 等）
+- **time**: 事件发生的时间（精确到日期，如 "2024-01-15"；若无法确定具体日期则写时间范围或阶段描述）
+- **subject**: 知识点的主体/角色名（如对话中的参与者名称、讨论的对象、决策方、执行方等）
 - **fact**: 完整的事实陈述（一句话描述发生了什么，必须具体、可验证）
-- **entities_or_values**: 涉及的关键实体或数值（如药名、剂量、检查数值、症状名称等，用逗号分隔）
+- **entities_or_values**: 涉及的关键实体或数值（如人名、地名、机构名、具体数字、产品名称、专有名词等，用逗号分隔）
 
 ## 提取要求
-1. **穷尽提取**：必须提取会话中每一个有意义的事实，不遗漏任何关键信息。宁可多提取，不可漏提取。
-2. **精确具体**：每个 fact 必须包含具体的数值、时间、实体名称，不要模糊概括。
-3. **原子化**：每个知识点只包含一个独立事实，不要将多个事实合并。
+1. **仔细提取**：提取会话中每个有意义的事实，不遗漏任何关键信息。
+2. **精确具体**：fact 必须包含具体的数值、时间、实体名称，不要模糊概括。
+3. **陈述详细**：每个知识点都要详细描述独立事实，不要遗漏关键信息。
 4. **全维度覆盖**：
-   - 症状与体征（出现/消失/变化）
-   - 检查与检验结果（具体数值）
-   - 用药方案（药名、剂量、频次、变更）
-   - 医嘱与建议（具体行动建议）
-   - 生活方式记录（饮食、运动、睡眠、作息）
-   - 时间线事件（首次出现、变化节点、就诊日期）
-   - 因果关系（某行为导致某结果）
-5. **数量要求**：信息密集的会话应提取 15-40 个知识点，简短会话至少提取 5-10 个。
+   - 事实陈述（涉及的人物、事件、数据、结论）
+   - 时间信息（具体日期、时间顺序、持续时间、截止期限）
+   - 决策与行动（做了什么决定、采取了什么行动、分配了什么任务）
+   - 状态与变化（之前/之后的对比、趋势、进展、结果）
+   - 因果关系（某行为导致某结果、某原因引发某变化）
+   - 观点与偏好（表达的意见、喜好、评价、态度、计划意向）
 
 ## 会话内容
 {session_text}
@@ -37,28 +35,26 @@ KNOWLEDGE_EXTRACTION_PROMPT_ZH = """你是一个精确的医疗知识提取助�
 ```"""
 
 
-KNOWLEDGE_EXTRACTION_PROMPT_EN = """You are a precise medical knowledge extraction assistant. Given a medical conversation record, extract ALL discrete knowledge points from it.
+KNOWLEDGE_EXTRACTION_PROMPT_EN = """You are a precise knowledge extraction assistant. Given a conversation record, extract ALL discrete knowledge points from it.
 
 ## Knowledge Point Format
 Each knowledge point MUST contain these four fields:
-- **time**: When the event occurred (exact date like "2024-01-15"; use time range or phase if date is uncertain)
-- **subject**: The subject/role of the knowledge point (e.g., "patient", "doctor", "test result", "medication plan")
+- **time**: When the event occurred (exact date like "2024-01-15"; use time range or phase description if date is uncertain)
+- **subject**: The subject/role of the knowledge point (e.g., participant names, discussed entity, decision-maker, executor)
 - **fact**: Complete factual statement (one sentence describing what happened, must be specific and verifiable)
-- **entities_or_values**: Key entities or values involved (drug names, dosages, test values, symptom names, comma-separated)
+- **entities_or_values**: Key entities or values involved (names, places, organizations, specific numbers, product names, proper nouns, comma-separated)
 
 ## Extraction Requirements
-1. **Exhaustive extraction**: Extract EVERY meaningful fact from the conversation. Better to over-extract than to miss anything.
+1. **Carefully extraction**: Extract EVERY meaningful fact from the conversation.
 2. **Precise and specific**: Each fact MUST contain specific values, times, and entity names. No vague summaries.
-3. **Atomic**: Each knowledge point contains ONE independent fact only. Do NOT merge multiple facts.
+3. **Detailed statement**: each knowledge point should describe the independent facts in detail, and do not omit the key information.
 4. **Full dimensional coverage**:
-   - Symptoms and signs (onset/resolution/changes)
-   - Test and examination results (specific values)
-   - Medication plans (drug name, dosage, frequency, changes)
-   - Medical advice and recommendations (specific actions)
-   - Lifestyle records (diet, exercise, sleep, routine)
-   - Timeline events (first occurrence, change points, visit dates)
-   - Causal relationships (action X led to outcome Y)
-5. **Quantity**: Information-dense sessions should yield 15-40 knowledge points; short sessions at least 5-10.
+   - Factual statements (people, events, data, conclusions involved)
+   - Temporal information (specific dates, chronological order, durations, deadlines)
+   - Decisions and actions (what was decided, what action was taken, what task was assigned)
+   - States and changes (before/after comparisons, trends, progress, outcomes)
+   - Causal relationships (action X led to outcome Y, cause Z triggered change W)
+   - Opinions and preferences (expressed views, likes, evaluations, attitudes, planned intentions)
 
 ## Session Content
 {session_text}
@@ -73,7 +69,7 @@ Output all knowledge points as a JSON array, nothing else:
 ```"""
 
 
-KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_ZH = """你是一个精确的医疗知识提取助手。给定一段新的医疗对话记录以及此前已记录的相关知识点，从新会话中提取所有新增或更新的知识点。
+KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_ZH = """你是一个精确的知识提取助手。给定一段新的对话记录以及此前已记录的相关知识点，从新会话中提取所有新增或更新的知识点。
 
 ## 知识点格式
 每个知识点必须包含以下四个字段：
@@ -107,7 +103,7 @@ KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_ZH = """你是一个精确的医疗知�
 ```"""
 
 
-KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_EN = """You are a precise medical knowledge extraction assistant. Given a new medical conversation record and previously recorded related knowledge points, extract all NEW or UPDATED knowledge points from the new session.
+KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_EN = """You are a precise knowledge extraction assistant. Given a new conversation record and previously recorded related knowledge points, extract all NEW or UPDATED knowledge points from the new session.
 
 ## Knowledge Point Format
 Each knowledge point MUST contain these four fields:
