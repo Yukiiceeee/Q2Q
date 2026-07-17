@@ -14,15 +14,15 @@ FAKE_QUERY_GEN_PROMPT_ZH = """你是一个记忆索引助手。给定一段会�
 ## 指令
 1. 仔细阅读会话内容，提取所有关键事实、数值、决策和变化。
 2. 按照上述四个维度，为每个维度生成尽可能多的假想查询，总数至少 {num_queries} 条。如果会话信息密度高，可以生成更多。
-3. 每条查询按"时间+主体+事件+结果"结构组织，包含具体细节（特定名词、数值、时间节点等）。
-4. 确保查询具体、可回答，且覆盖会话中所有重要信息，不要遗漏关键事实。
+3. 确保查询具体、可回答，且覆盖会话中所有重要信息，不要遗漏关键事实。
+4. 每条查询按"时间+主体+事件+结果"结构组织，包含具体细节（特定名词、数值、时间节点等）。
 5. 仅输出一个 JSON 数组，包含查询字符串，不要输出任何其他内容。
 
 ## 会话内容
 {session_text}
 
 ## 输出
-生成大约 {num_queries} 条假想查询（信息密度高时可以更多），以 JSON 数组形式输出："""
+生成假想查询，以 JSON 数组形式输出："""
 
 
 FAKE_QUERY_GEN_PROMPT_EN = """You are a memory indexing assistant. Given a conversation session, generate hypothetical queries that a user might ask in the future. These queries will serve as retrieval indices for the memory, requiring high quality, multi-dimensional, and fine-grained coverage.
@@ -47,7 +47,7 @@ Generated queries MUST cover ALL of the following dimensions:
 {session_text}
 
 ## Output
-Generate about {num_queries} hypothetical queries (more if information-dense), as a JSON array:"""
+Generate hypothetical queries, as a JSON array:"""
 
 
 def build_fake_query_gen_prompt(

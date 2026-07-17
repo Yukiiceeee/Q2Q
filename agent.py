@@ -89,7 +89,6 @@ class Q2QAgent:
             language=config.language,
             max_context_tokens=config.retrieval.max_context_tokens,
             fq_confidence_threshold=config.retrieval.fq_confidence_threshold,
-            kp_top_k=config.retrieval.kp_top_k,
         )
 
         # Usage tracker

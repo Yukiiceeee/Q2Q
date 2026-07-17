@@ -318,14 +318,16 @@ class ChromaDBStore(BaseMemoryStore):
         try:
             count = self._paragraph_collection.count()
             if count == 0:
+                logger.debug(f"Paragraph collection is empty, skipping search for {memory_id}")
                 return []
             results = self._paragraph_collection.query(
                 query_embeddings=[query_embedding.tolist()],
-                n_results=min(top_k * 5, count),
+                n_results=min(top_k, count),
                 where={"memory_id": memory_id},
                 include=["distances", "documents"],
             )
             if not results["ids"] or not results["ids"][0]:
+                logger.debug(f"No paragraphs found for memory_id={memory_id}")
                 return []
 
             hits = []
@@ -337,7 +339,8 @@ class ChromaDBStore(BaseMemoryStore):
 
             hits.sort(key=lambda h: h["score"], reverse=True)
             return hits[:top_k]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"search_paragraphs_for_memory failed for {memory_id}: {e}")
             return []
 
     def search_kps_for_memory(
