@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import json
 from pathlib import Path
@@ -27,7 +28,6 @@ class Q2QAgent:
     def __init__(self, config: Q2QConfig):
         self.config = config
 
-        # LLM client
         self.llm_client: BaseLLMClient = create_llm_client(
             provider=config.llm.provider,
             model=config.llm.model,
@@ -37,24 +37,20 @@ class Q2QAgent:
             base_url=config.llm.base_url or None,
         )
 
-        # Embedding provider
         self.embedding_provider: BaseEmbeddingProvider = create_embedding_provider(
             provider=config.embedding.provider,
             model_name=config.embedding.model_name,
             device=config.embedding.device,
         )
 
-        # Storage
         self.memory_store: BaseMemoryStore = self._create_store(config)
 
-        # Version detector
         self.version_detector = VersionDetector(
             memory_store=self.memory_store,
             embedding_provider=self.embedding_provider,
             threshold=config.retrieval.version_threshold,
         )
 
-        # Memory construction
         self.query_generator = FakeQueryGenerator(
             llm_client=self.llm_client,
             num_queries=config.retrieval.num_fake_queries,
@@ -67,7 +63,6 @@ class Q2QAgent:
             version_detector=self.version_detector,
         )
 
-        # Retrieval
         self.query_decomposer = QueryDecomposer(
             llm_client=self.llm_client,
             embedding_provider=self.embedding_provider,
@@ -91,7 +86,6 @@ class Q2QAgent:
             fq_confidence_threshold=config.retrieval.fq_confidence_threshold,
         )
 
-        # Usage tracker
         self.usage_tracker = get_usage_tracker()
 
         logger.info(
@@ -111,12 +105,11 @@ class Q2QAgent:
             return JsonMemoryStore(storage_path=config.storage.json_path)
         raise ValueError(f"Unsupported storage backend: {config.storage.backend}")
 
-    def memorize(self, session_text: str, metadata: dict | None = None) -> MemoryEntry:
-        """Build and store a memory entry from a session text."""
+    async def memorize(self, session_text: str, metadata: dict | None = None) -> MemoryEntry:
         self.usage_tracker.set_phase("memorize")
         logger.info(f"--- Memorize Start ({len(session_text)} chars) ---")
 
-        entry = self.memory_constructor.build_memory(session_text, metadata)
+        entry = await self.memory_constructor.build_memory(session_text, metadata)
 
         logger.info(f"  Memory ID: {entry.memory_id}")
         logger.info(f"  Fake Queries ({len(entry.fake_queries)}):")
@@ -130,25 +123,22 @@ class Q2QAgent:
 
         return entry
 
-    def query(
+    async def query(
         self,
         raw_query: str,
         history: str = "",
         return_answer: bool = True,
     ) -> dict:
-        """Retrieve relevant memories and optionally generate an answer."""
         self.usage_tracker.set_phase("query")
         logger.info(f"--- Query Start ---")
         logger.info(f"  Raw Query: {raw_query}")
 
-        # Step 1: decompose
-        sub_queries = self.query_decomposer.decompose(raw_query, history)
+        sub_queries = await self.query_decomposer.decompose(raw_query, history)
         logger.info(f"  Sub-queries ({len(sub_queries)}):")
         for sq in sub_queries:
             logger.info(f"    [{sq.index}] {sq.text}")
 
-        # Step 2: dual-path retrieval
-        results = self.dual_retriever.retrieve(sub_queries)
+        results = await self.dual_retriever.retrieve(sub_queries)
         logger.info(f"  Retrieval Results: {len(results)}")
         for i, r in enumerate(results):
             matched_fqs_preview = r.matched_fake_queries[0][:60] if r.matched_fake_queries else ""
@@ -161,10 +151,9 @@ class Q2QAgent:
                 f"matched_fq=\"{matched_fqs_preview}\""
             )
 
-        # Step 3: generate answer (optional)
         answer = ""
         if return_answer and results:
-            answer = self.answerer.answer(raw_query, results, history, sub_queries)
+            answer = await self.answerer.answer(raw_query, results, history, sub_queries)
             logger.info(f"  Answer generated ({len(answer)} chars)")
 
         response = {
@@ -190,8 +179,20 @@ class Q2QAgent:
         logger.info(f"--- Query Complete ---")
         return response
 
+    async def batch_memorize(
+        self,
+        sessions: list[str],
+        max_concurrent: int = 5,
+    ) -> list[MemoryEntry]:
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _memorize_one(text: str) -> MemoryEntry:
+            async with semaphore:
+                return await self.memorize(text)
+
+        return list(await asyncio.gather(*[_memorize_one(s) for s in sessions]))
+
     def get_stats(self) -> dict:
         return {
-            "memory_count": self.memory_store.count(),
             "llm_usage": self.usage_tracker.get_stats(),
         }

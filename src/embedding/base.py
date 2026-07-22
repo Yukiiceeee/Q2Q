@@ -1,6 +1,5 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Optional
 import numpy as np
 import logging
 
@@ -15,29 +14,27 @@ class BaseEmbeddingProvider(ABC):
         self.dimension = dimension
 
     @abstractmethod
-    def embed_text(self, text: str) -> np.ndarray:
+    async def embed_text(self, text: str) -> np.ndarray:
         ...
 
     @abstractmethod
-    def embed_batch(self, texts: list[str]) -> list[np.ndarray]:
+    async def embed_batch(self, texts: list[str]) -> list[np.ndarray]:
         ...
 
-    def embed_long_text(
+    async def embed_long_text(
         self,
         text: str,
         window_size: int = 0,
         stride: int = 0,
     ) -> list[np.ndarray]:
-        """Embed long text with sliding window, returning a list of chunk embeddings."""
         ws = window_size or self.max_seq_length
         st = stride or (ws // 2)
         chunks = self._sliding_window_split(text, ws, st)
         if not chunks:
-            return [self.embed_text(text)]
-        return self.embed_batch(chunks)
+            return [await self.embed_text(text)]
+        return await self.embed_batch(chunks)
 
     def _sliding_window_split(self, text: str, window_size: int, stride: int) -> list[str]:
-        """Split text into overlapping chunks by character count."""
         if len(text) <= window_size:
             return [text]
         chunks = []
