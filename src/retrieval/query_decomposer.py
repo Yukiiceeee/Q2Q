@@ -23,10 +23,10 @@ class QueryDecomposer:
         self.embedding_provider = embedding_provider
         self.language = language
 
-    def decompose(self, raw_query: str, history: str = "") -> list[SubQuery]:
+    async def decompose(self, raw_query: str, history: str = "") -> list[SubQuery]:
         prompt = build_query_decompose_prompt(raw_query, history, self.language)
         messages = format_messages(user_message=prompt)
-        response = self.llm_client.chat(messages, temperature=0.3)
+        response = await self.llm_client.chat(messages, temperature=0.3)
         parsed = self._parse_sub_queries(response.content)
 
         if not parsed:
@@ -39,7 +39,7 @@ class QueryDecomposer:
                 combined += " " + item["keywords"]
             embed_texts.append(combined)
 
-        embeddings = self.embedding_provider.embed_batch(embed_texts)
+        embeddings = await self.embedding_provider.embed_batch(embed_texts)
         sub_queries = []
         for i, (item, emb) in enumerate(zip(parsed, embeddings)):
             sub_queries.append(SubQuery(

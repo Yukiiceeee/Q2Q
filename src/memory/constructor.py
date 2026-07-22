@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import re
 import logging
 
@@ -31,69 +32,76 @@ class MemoryConstructor:
         self.memory_store = memory_store
         self.version_detector = version_detector
 
-    def build_memory(self, session_text: str, metadata: dict | None = None) -> MemoryEntry:
+    async def build_memory(self, session_text: str, metadata: dict | None = None) -> MemoryEntry:
         entry = MemoryEntry(session_text=session_text, metadata=metadata or {})
 
+        # Fire-and-forget: content + paragraph embeddings (only depend on session_text)
+        content_task = asyncio.create_task(
+            self.embedding_provider.embed_long_text(session_text)
+        )
+        paragraphs = self._split_into_paragraphs(session_text)
+        para_task = (
+            asyncio.create_task(self.embedding_provider.embed_batch(paragraphs))
+            if paragraphs else None
+        )
+
         # Step 1: LLM Call 1 - generate fake query texts
-        query_texts = self.query_generator._generate_queries(session_text)
+        query_texts = await self.query_generator._generate_queries(session_text)
         logger.info(f"Step 1: Generated {len(query_texts)} fake query texts for memory {entry.memory_id}")
 
         if not query_texts:
-            content_embeddings = self.embedding_provider.embed_long_text(session_text)
-            entry.content_embeddings = content_embeddings
-            self.memory_store.save(entry)
+            entry.content_embeddings = await content_task
+            if para_task:
+                entry.paragraph_embeddings = await para_task
+                entry.paragraphs = paragraphs
+            await self.memory_store.save(entry)
             return entry
 
-        # Step 2: Embed query texts (for version detection)
-        query_only_embeddings = self.embedding_provider.embed_batch(query_texts)
+        # Step 2: Embed query texts
+        query_only_embeddings = await self.embedding_provider.embed_batch(query_texts)
         logger.info(f"Step 2: Computed {len(query_only_embeddings)} query embeddings")
 
         # Step 3: Version detection
         version_histories = None
         if self.version_detector:
-            version_histories = self.version_detector.detect_versions(
+            version_histories = await self.version_detector.detect_versions(
                 query_texts, query_only_embeddings
             )
             logger.info(f"Step 3: Version detection completed")
 
-        # Step 4: LLM Call 2 - extract knowledge points (replaces answer generation)
+        # Step 4: LLM Call 2 - extract knowledge points
         if version_histories:
-            linked_kps = self._gather_linked_knowledge_points(
+            linked_kps = await self._gather_linked_knowledge_points(
                 version_histories, query_only_embeddings
             )
             if linked_kps:
-                kp_dicts = self.query_generator.extract_knowledge_points_with_context(
+                kp_dicts = await self.query_generator.extract_knowledge_points_with_context(
                     session_text, linked_kps
                 )
             else:
-                kp_dicts = self.query_generator.extract_knowledge_points(session_text)
+                kp_dicts = await self.query_generator.extract_knowledge_points(session_text)
         else:
-            kp_dicts = self.query_generator.extract_knowledge_points(session_text)
+            kp_dicts = await self.query_generator.extract_knowledge_points(session_text)
 
         entry.knowledge_points = [KnowledgePoint.from_dict(kp) for kp in kp_dicts]
         logger.info(f"Step 4: Extracted {len(entry.knowledge_points)} knowledge points")
 
-        # Step 4.5: Embed knowledge points for query-aware reranking
+        # Step 4.5: Embed knowledge points
         if entry.knowledge_points:
             kp_texts = [
                 f"[{kp.time}] {kp.subject}: {kp.fact} ({kp.entities_or_values})"
                 for kp in entry.knowledge_points
             ]
-            entry.kp_embeddings = self.embedding_provider.embed_batch(kp_texts)
+            entry.kp_embeddings = await self.embedding_provider.embed_batch(kp_texts)
             logger.info(f"Step 4.5: Computed {len(entry.kp_embeddings)} KP embeddings")
 
-        # Step 5: Final embeddings - query text only (no answer concatenation)
+        # Step 5: Final embeddings
         final_embeddings = query_only_embeddings
         logger.info(f"Step 5: Using query-only embeddings ({len(final_embeddings)} vectors)")
 
-        # Step 6: Build FakeQuery objects with DAG metadata
+        # Step 6: Build FakeQuery objects
         for i, (query, emb) in enumerate(zip(query_texts, final_embeddings)):
-            fq = FakeQuery(
-                text=query,
-                answer="",
-                embedding=emb,
-                memory_id=entry.memory_id,
-            )
+            fq = FakeQuery(text=query, answer="", embedding=emb, memory_id=entry.memory_id)
             if version_histories and i < len(version_histories):
                 vh = version_histories[i]
                 fq.parent_ids = vh["parent_ids"]
@@ -101,23 +109,19 @@ class MemoryConstructor:
             else:
                 fq.parent_ids = []
                 fq.depth = 0
-
             entry.fake_queries.append(fq)
 
-        # Step 7: Compute content embeddings
-        content_embeddings = self.embedding_provider.embed_long_text(session_text)
-        entry.content_embeddings = content_embeddings
+        # Step 7: Await content embeddings (already running in parallel)
+        entry.content_embeddings = await content_task
 
-        # Step 7.5: Paragraph splitting + embedding
-        paragraphs = self._split_into_paragraphs(session_text)
-        if paragraphs:
-            paragraph_embeddings = self.embedding_provider.embed_batch(paragraphs)
+        # Step 7.5: Await paragraph embeddings
+        if para_task:
+            entry.paragraph_embeddings = await para_task
             entry.paragraphs = paragraphs
-            entry.paragraph_embeddings = paragraph_embeddings
             logger.info(f"Step 7.5: Split into {len(paragraphs)} paragraphs")
 
         # Step 8: Persist
-        self.memory_store.save(entry)
+        await self.memory_store.save(entry)
         logger.info(
             f"Memory {entry.memory_id} built: "
             f"{len(entry.fake_queries)} queries, "
@@ -127,11 +131,11 @@ class MemoryConstructor:
         )
         return entry
 
-    def _gather_linked_knowledge_points(
+    async def _gather_linked_knowledge_points(
         self, version_histories: list[dict], query_embeddings: list[np.ndarray]
     ) -> list[dict]:
         seen_memory_ids = set()
-        all_kp_candidates: list[tuple[dict, np.ndarray]] = []
+        memory_ids_to_fetch = []
 
         for vh in version_histories:
             if not vh.get("related_history"):
@@ -140,18 +144,28 @@ class MemoryConstructor:
                 mid = node.get("memory_id", "")
                 if mid and mid not in seen_memory_ids:
                     seen_memory_ids.add(mid)
-                    mem = self.memory_store.get_by_id(mid)
-                    if mem and mem.knowledge_points and mem.kp_embeddings:
-                        for kp, emb in zip(mem.knowledge_points, mem.kp_embeddings):
-                            all_kp_candidates.append((kp.to_dict(), emb))
-                    elif mem and mem.knowledge_points:
-                        for kp in mem.knowledge_points:
-                            all_kp_candidates.append((kp.to_dict(), None))
+                    memory_ids_to_fetch.append(mid)
+
+        if not memory_ids_to_fetch:
+            return []
+
+        # Concurrent fetch of all related memories
+        memories = await asyncio.gather(*[
+            self.memory_store.get_by_id(mid) for mid in memory_ids_to_fetch
+        ])
+
+        all_kp_candidates: list[tuple[dict, np.ndarray]] = []
+        for mem in memories:
+            if mem and mem.knowledge_points and mem.kp_embeddings:
+                for kp, emb in zip(mem.knowledge_points, mem.kp_embeddings):
+                    all_kp_candidates.append((kp.to_dict(), emb))
+            elif mem and mem.knowledge_points:
+                for kp in mem.knowledge_points:
+                    all_kp_candidates.append((kp.to_dict(), None))
 
         if not all_kp_candidates:
             return []
 
-        # Rank by max cosine similarity to any query embedding
         scored_kps: list[tuple[float, dict]] = []
         for kp_dict, kp_emb in all_kp_candidates:
             if kp_emb is None or not query_embeddings:
@@ -173,18 +187,15 @@ class MemoryConstructor:
 
     def _split_into_paragraphs(self, session_text: str) -> list[str]:
         segments = re.split(r'\n{2,}', session_text)
-
         paragraphs = []
         buffer = ""
         for seg in segments:
             seg = seg.strip()
             if not seg:
                 continue
-
             if len(buffer) + len(seg) + 1 < PARAGRAPH_MIN_CHARS:
                 buffer = (buffer + "\n" + seg).strip() if buffer else seg
                 continue
-
             if buffer:
                 if len(buffer) >= PARAGRAPH_MIN_CHARS:
                     paragraphs.append(buffer)
@@ -195,18 +206,15 @@ class MemoryConstructor:
                         buffer = ""
                     continue
                 buffer = ""
-
             if len(seg) <= PARAGRAPH_MAX_CHARS:
                 paragraphs.append(seg)
             else:
                 chunks = self._split_long_segment(seg)
                 paragraphs.extend(chunks)
-
         if buffer and len(buffer) >= PARAGRAPH_MIN_CHARS:
             paragraphs.append(buffer)
         elif buffer and paragraphs:
             paragraphs[-1] = paragraphs[-1] + "\n" + buffer
-
         return paragraphs
 
     def _split_long_segment(self, text: str) -> list[str]:
@@ -221,8 +229,6 @@ class MemoryConstructor:
                 current = sent
             else:
                 current += sent
-
         if current.strip():
             chunks.append(current.strip())
-
         return [c for c in chunks if len(c) >= PARAGRAPH_MIN_CHARS]

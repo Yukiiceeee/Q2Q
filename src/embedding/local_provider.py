@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import numpy as np
 import logging
 
@@ -23,9 +24,13 @@ class LocalEmbeddingProvider(BaseEmbeddingProvider):
             self.max_seq_length = self._model.max_seq_length
         logger.info(f"Loaded local embedding model: {model_path} (dim={self.dimension})")
 
-    def embed_text(self, text: str) -> np.ndarray:
-        return self._model.encode(text, normalize_embeddings=True)
+    async def embed_text(self, text: str) -> np.ndarray:
+        return await asyncio.to_thread(
+            self._model.encode, text, normalize_embeddings=True
+        )
 
-    def embed_batch(self, texts: list[str]) -> list[np.ndarray]:
-        embeddings = self._model.encode(texts, normalize_embeddings=True, batch_size=32)
+    async def embed_batch(self, texts: list[str]) -> list[np.ndarray]:
+        embeddings = await asyncio.to_thread(
+            self._model.encode, texts, normalize_embeddings=True, batch_size=32
+        )
         return [embeddings[i] for i in range(len(texts))]

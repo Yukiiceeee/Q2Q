@@ -20,26 +20,26 @@ class FakeQueryGenerator:
         self.num_queries = num_queries
         self.language = language
 
-    def _generate_queries(self, session_text: str) -> list[str]:
+    async def _generate_queries(self, session_text: str) -> list[str]:
         prompt = build_fake_query_gen_prompt(session_text, self.num_queries, self.language)
         messages = format_messages(user_message=prompt)
-        response = self.llm_client.chat(messages, temperature=0.7)
+        response = await self.llm_client.chat(messages, temperature=0.7)
         return self._parse_string_list(response.content)
 
-    def extract_knowledge_points(self, session_text: str) -> list[dict]:
+    async def extract_knowledge_points(self, session_text: str) -> list[dict]:
         prompt = build_knowledge_extraction_prompt(session_text, self.language)
         messages = format_messages(user_message=prompt)
-        response = self.llm_client.chat(messages, temperature=0.3)
+        response = await self.llm_client.chat(messages, temperature=0.3)
         return self._parse_knowledge_points(response.content)
 
-    def extract_knowledge_points_with_context(
+    async def extract_knowledge_points_with_context(
         self, session_text: str, linked_kps: list[dict]
     ) -> list[dict]:
         prompt = build_knowledge_extraction_with_context_prompt(
             session_text, linked_kps, self.language
         )
         messages = format_messages(user_message=prompt)
-        response = self.llm_client.chat(messages, temperature=0.3)
+        response = await self.llm_client.chat(messages, temperature=0.3)
         return self._parse_knowledge_points(response.content)
 
     def _parse_knowledge_points(self, content: str) -> list[dict]:

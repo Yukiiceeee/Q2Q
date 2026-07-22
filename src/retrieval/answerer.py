@@ -42,7 +42,7 @@ class Answerer:
             return text
         return self._tokenizer.decode(tokens[:max_tokens]) + "..."
 
-    def answer(
+    async def answer(
         self,
         raw_query: str,
         results: list[RetrievalResult],
@@ -52,14 +52,13 @@ class Answerer:
         memories_context = self._build_memories_context(results)
         prompt = build_answer_gen_prompt(raw_query, memories_context, history, self.language)
         messages = format_messages(user_message=prompt)
-        response = self.llm_client.chat(messages, temperature=0.7)
+        response = await self.llm_client.chat(messages, temperature=0.7)
         return response.content
 
     def _build_memories_context(self, results: list[RetrievalResult]) -> str:
         if not results:
             return "(无相关记忆)" if self.language == "zh" else "(No relevant memories found)"
 
-        # Global threshold check: paragraph enrichment only when ALL results are low confidence
         all_below_threshold = all(
             r.final_score < self.fq_confidence_threshold for r in results
         )
@@ -71,7 +70,6 @@ class Answerer:
         for i, r in enumerate(results, 1):
             memory_content_parts = []
 
-            # Layer 1: Always include ALL knowledge points (no reranking)
             if r.memory.knowledge_points:
                 kp_text = self._format_knowledge_points(
                     r.memory.knowledge_points,
@@ -79,7 +77,6 @@ class Answerer:
                 )
                 memory_content_parts.append(kp_text)
 
-            # Layer 2: Version chain context (only when NOT all-below-threshold)
             if not all_below_threshold and r.version_chain_context:
                 for chain_idx, chain in enumerate(r.version_chain_context):
                     if len(chain) > 1:
@@ -93,7 +90,6 @@ class Answerer:
                             chain_lines.append(f"  [d{node.depth}] {node.text}")
                         memory_content_parts.append("\n".join(chain_lines))
 
-            # Layer 3: Matched paragraphs (only when ALL results are below threshold)
             if all_below_threshold and r.matched_paragraphs:
                 para_header = (
                     "\n[相关片段]:" if self.language == "zh" else "\n[Relevant Excerpts]:"
@@ -104,7 +100,6 @@ class Answerer:
                     para_lines.append(f"  {para}")
                 memory_content_parts.append("\n".join(para_lines))
 
-            # No fallback to session_text — skip memory if no content
             if not memory_content_parts:
                 continue
 
@@ -136,7 +131,6 @@ class Answerer:
         kps: list[KnowledgePoint],
         token_limit: int,
     ) -> str:
-        """Format all knowledge points within token budget (no reranking)."""
         header = "Relevant Knowledge Points:" if self.language == "en" else "相关知识点:"
         lines = [header]
         total_tokens = self._count_tokens(header)

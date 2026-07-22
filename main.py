@@ -1,14 +1,15 @@
 """Q2Q Agent Memory System - Entry Point
 
 Configuration loading logic:
-1. .env → environment variables (API keys, model paths, storage paths)
-2. CLI args → runtime parameters (alpha, top_k, storage backend, language, etc.)
-3. Defaults → for any parameter not explicitly provided
+1. .env -> environment variables (API keys, model paths, storage paths)
+2. CLI args -> runtime parameters (alpha, top_k, storage backend, language, etc.)
+3. Defaults -> for any parameter not explicitly provided
 
 Default mode: interactive Q&A (memorize + query in a streaming loop)
 """
 
 import argparse
+import asyncio
 import json
 import sys
 import os
@@ -38,8 +39,7 @@ def apply_cli_overrides(config: Q2QConfig, args: argparse.Namespace) -> Q2QConfi
     return config
 
 
-def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
-    """Interactive streaming Q&A mode."""
+async def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
     print("=" * 60)
     print("  Q2Q Agent Memory System - Interactive Mode")
     print("=" * 60)
@@ -60,9 +60,11 @@ def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
     print("=" * 60)
     print()
 
+    loop = asyncio.get_event_loop()
+
     while True:
         try:
-            user_input = input(">>> ").strip()
+            user_input = await loop.run_in_executor(None, lambda: input(">>> ").strip())
         except (EOFError, KeyboardInterrupt):
             print("\nBye!")
             break
@@ -79,10 +81,12 @@ def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
             print(json.dumps(stats, indent=2, ensure_ascii=False))
 
         elif user_input == "/clear":
-            count = agent.memory_store.count()
-            confirm = input(f"  Confirm clear {count} memories? (y/N): ").strip().lower()
+            count = await agent.memory_store.count()
+            confirm = await loop.run_in_executor(
+                None, lambda: input(f"  Confirm clear {count} memories? (y/N): ").strip().lower()
+            )
             if confirm == "y":
-                agent.memory_store.clear()
+                await agent.memory_store.clear()
                 print(f"  Cleared {count} memories.")
             else:
                 print("  Cancelled.")
@@ -92,7 +96,7 @@ def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
             lines = []
             while True:
                 try:
-                    line = input("  ... ")
+                    line = await loop.run_in_executor(None, lambda: input("  ... "))
                 except (EOFError, KeyboardInterrupt):
                     break
                 if line == "":
@@ -102,7 +106,7 @@ def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
             if lines:
                 text = "\n".join(lines)
                 print(f"  Memorizing ({len(text)} chars)...")
-                entry = agent.memorize(text)
+                entry = await agent.memorize(text)
                 print(f"  Done! memory_id={entry.memory_id}")
                 print(f"  Fake queries ({len(entry.fake_queries)}):")
                 for fq in entry.fake_queries:
@@ -113,33 +117,29 @@ def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
         elif user_input.startswith("/query "):
             query_text = user_input[7:].strip()
             if query_text:
-                _run_query(agent, query_text)
+                await _run_query(agent, query_text)
             else:
                 print("  Usage: /query <your question>")
 
         elif user_input == "/query":
-            q = input("  Query: ").strip()
+            q = await loop.run_in_executor(None, lambda: input("  Query: ").strip())
             if q:
-                _run_query(agent, q)
+                await _run_query(agent, q)
 
         else:
-            # Default: treat as a query
-            _run_query(agent, user_input)
+            await _run_query(agent, user_input)
 
 
-def _run_query(agent: Q2QAgent, query_text: str) -> None:
-    """Execute query and print results in streaming fashion."""
+async def _run_query(agent: Q2QAgent, query_text: str) -> None:
     print(f"\n  Querying: {query_text}")
     print("  " + "-" * 50)
 
-    result = agent.query(raw_query=query_text, return_answer=True)
+    result = await agent.query(raw_query=query_text, return_answer=True)
 
-    # Sub-queries
     print(f"  Sub-queries ({len(result['sub_queries'])}):")
     for sq in result["sub_queries"]:
         print(f"    - {sq}")
 
-    # Retrieval results
     print(f"\n  Retrieved memories ({result['num_results']}):")
     for r in result["results"][:5]:
         print(f"    [{r['final_score']:.4f}] q2q={r['score_q2q']:.4f} q2c={r['score_q2c']:.4f}")
@@ -147,7 +147,6 @@ def _run_query(agent: Q2QAgent, query_text: str) -> None:
         print(f"      FQ: {fq_preview}")
         print(f"      Preview: {r['content_preview'][:80]}...")
 
-    # Answer
     if result.get("answer"):
         print(f"\n  {'=' * 50}")
         print(f"  Answer:\n")
@@ -156,7 +155,7 @@ def _run_query(agent: Q2QAgent, query_text: str) -> None:
     print()
 
 
-def cmd_memorize(agent: Q2QAgent, args: argparse.Namespace) -> None:
+async def cmd_memorize(agent: Q2QAgent, args: argparse.Namespace) -> None:
     if args.file:
         with open(args.file, "r", encoding="utf-8") as f:
             text = f.read()
@@ -166,7 +165,7 @@ def cmd_memorize(agent: Q2QAgent, args: argparse.Namespace) -> None:
         print("Error: provide --text or --file")
         sys.exit(1)
 
-    entry = agent.memorize(text)
+    entry = await agent.memorize(text)
     print(f"\nMemory created: {entry.memory_id}")
     print(f"  Fake queries ({len(entry.fake_queries)}):")
     for fq in entry.fake_queries:
@@ -174,8 +173,8 @@ def cmd_memorize(agent: Q2QAgent, args: argparse.Namespace) -> None:
     print(f"  Content chunks: {len(entry.content_embeddings)}")
 
 
-def cmd_query(agent: Q2QAgent, args: argparse.Namespace) -> None:
-    result = agent.query(
+async def cmd_query(agent: Q2QAgent, args: argparse.Namespace) -> None:
+    result = await agent.query(
         raw_query=args.query,
         history=args.history or "",
         return_answer=not args.no_answer,
@@ -195,24 +194,21 @@ def cmd_query(agent: Q2QAgent, args: argparse.Namespace) -> None:
         print(f"\n--- Answer ---\n{result['answer']}")
 
 
-def cmd_stats(agent: Q2QAgent, _args: argparse.Namespace) -> None:
+async def cmd_stats(agent: Q2QAgent, _args: argparse.Namespace) -> None:
     stats = agent.get_stats()
     print(json.dumps(stats, indent=2, ensure_ascii=False))
 
 
-def cmd_clear(agent: Q2QAgent, _args: argparse.Namespace) -> None:
-    count = agent.memory_store.count()
-    agent.memory_store.clear()
+async def cmd_clear(agent: Q2QAgent, _args: argparse.Namespace) -> None:
+    count = await agent.memory_store.count()
+    await agent.memory_store.clear()
     print(f"Cleared {count} memory entries")
 
 
-def main() -> None:
+async def async_main() -> None:
     parser = argparse.ArgumentParser(description="Q2Q Agent Memory System")
 
-    # Environment config
     parser.add_argument("--env", type=str, default=None, help="Path to .env file")
-
-    # Runtime parameters (override defaults)
     parser.add_argument("--log-level", type=str, default=None, help="Log level (DEBUG/INFO/WARNING)")
     parser.add_argument("--storage", type=str, default=None, help="Storage backend (chromadb/json)")
     parser.add_argument("--language", type=str, default=None, help="Prompt language (zh/en)")
@@ -223,43 +219,30 @@ def main() -> None:
 
     subparsers = parser.add_subparsers(dest="command", help="Command")
 
-    # interactive (default)
     subparsers.add_parser("interactive", help="Interactive Q&A mode (default)")
 
-    # memorize
     p_mem = subparsers.add_parser("memorize", help="Store a session as memory")
     p_mem.add_argument("--text", type=str, help="Session text to memorize")
     p_mem.add_argument("--file", type=str, help="File containing session text")
 
-    # query
     p_query = subparsers.add_parser("query", help="Query memories (single shot)")
     p_query.add_argument("query", type=str, help="Query string")
     p_query.add_argument("--history", type=str, default="", help="Conversation history")
     p_query.add_argument("--no-answer", action="store_true", help="Skip answer generation")
 
-    # stats
     subparsers.add_parser("stats", help="Show statistics")
-
-    # clear
     subparsers.add_parser("clear", help="Clear all memories")
 
     args = parser.parse_args()
 
-    # Step 1: Load env config
     config = Q2QConfig.from_env(args.env)
-
-    # Step 2: Apply CLI overrides
     config = apply_cli_overrides(config, args)
-
-    # Step 3: Setup logging
     setup_logger("q2q", config.log.level, config.log.log_dir)
 
-    # Step 4: Init agent
     agent = Q2QAgent(config)
 
-    # Step 5: Dispatch command (default: interactive)
     if not args.command or args.command == "interactive":
-        cmd_interactive(agent, args)
+        await cmd_interactive(agent, args)
     else:
         commands = {
             "memorize": cmd_memorize,
@@ -267,7 +250,11 @@ def main() -> None:
             "stats": cmd_stats,
             "clear": cmd_clear,
         }
-        commands[args.command](agent, args)
+        await commands[args.command](agent, args)
+
+
+def main() -> None:
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
