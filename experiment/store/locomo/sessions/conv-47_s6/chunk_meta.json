@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 9,
+    "text": "John: Hey James! Long time no see! I have great news! Last Tuesday I met three cool new friends in my programming course, they share the same passion as me and it's cool to grow my social circle. Have you had any fun surprises lately?\nJames: Hey John! Glad you had a great week meeting new people! Something awesome happened to me last Thursday – I got to work with one of my gaming pals on a programming project! We combined programming and gaming, and created this virtual world inspired by Witcher 3. It was awesome to see our ideas come to life!\nJohn: It must've felt great to put your skills to work on that project! Do you have any screenshots of the world you made? It must've been so awesome to see it all come together!\nJames: It was quite the experience. Unfortunately, I don't have a screenshot of the full virtual world, but I do have a screenshot of the game character I created. It was a lot of work but so rewarding when it all came together. Super satisfying!\nJohn: Wow, James! This is amazing. I can really feel the atmosphere here. Did you get the inspiration for this from something?\nJames: Thanks, I'm glad you can feel the atmosphere. I got the idea from a walk with my dogs two weeks ago. We were walking around our neighborhood, and a stranger was walking towards us. I had never seen her nearby before. Her eyes and appearance amazed me so much, it seemed to me that I fell in love at first sight. It’s a pity that I didn’t approach her to get to know her, but at least I remembered her appearance and embodied it in the game.\nJohn: That's awesome. Real-life experiences can be so inspiring. It's like the virtual world is connected to the real world. By the way, two days ago I wanted to be alone with nature. This is the canyon I found in the surrounding area. Very calming view.\nJames: That's so cool you had a similar experience. I bet you felt inspired seeing it in person.\nJohn: Capturing that view was amazing. It was like connecting the real and the imaginary. It really sparked my creativity and motivation.\nJames: Cool! What else gives you motivation?",
+    "session_id": "conv-47_s6"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 10,
+    "turn_end": 18,
+    "text": "John: I adhere to the principle that only those who rest well work well. Therefore, chilling with friends and traveling always give me motivation to work further.\nJames: I agree with you, I also love to travel. Last year I visited Italy, for example. A very beautiful country with delicious food.\nJohn: Oh, Italy! I always dreamed of visiting there. What other countries have you been to?\nJames: In fact, I haven't visited many countries. Besides Italy, I was also in Turkey and Mexico. What was the last country you visited?\nJohn: This was Japan. The megacities of this country impress me, everything there is so technologically advanced, the huge screens on the buildings are mesmerizing. And, of course, very tasty street food.\nJames: It would be cool to go somewhere together next year, don't you think?\nJohn: Of course, I hope everything works out for us, I will believe in it!\nJames: Great, then I'll start looking for a country where we can go!\nJohn: Keep me posted, James! Let me know if you need help.",
+    "session_id": "conv-47_s6"
+  }
+]

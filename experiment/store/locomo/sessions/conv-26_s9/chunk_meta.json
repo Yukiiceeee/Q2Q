@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 14,
+    "text": "Melanie: Hey Caroline, hope all's good! I had a quiet weekend after we went camping with my fam two weekends ago. It was great to unplug and hang with the kids. What've you been up to? Anything fun over the weekend?\nCaroline: Hey Melanie! That sounds great! Last weekend I joined a mentorship program for LGBTQ youth - it's really rewarding to help the community.\nMelanie: Wow, Caroline! It's great that you're helping out. How's it going? Got any cool experiences you can share?\nCaroline: The mentoring is going great! I've met some amazing young folks and supported them along the way. It's inspiring to see how resilient and strong they are.\nMelanie: Wow, Caroline, that sounds super rewarding! Young people's resilience is amazing. Care to share some stories?\nCaroline: I mentor a transgender teen just like me. We've been working on building up confidence and finding positive strategies, and it's really been paying off! We had a great time at the LGBT pride event last month.\nMelanie: Caroline, awesome news that you two are getting along! What was it like for you both? Care to fill me in?\nCaroline: The pride event was awesome! It was so encouraging to be surrounded by so much love and acceptance.\nMelanie: Wow! What's the best part you remember from it?\nCaroline: Seeing my mentee's face light up when they saw the support was the best! Such a special moment.\nMelanie: Wow, Caroline! They must have felt so appreciated. It's awesome to see the difference we can make in each other's lives. Any other exciting LGBTQ advocacy stuff coming up?\nCaroline: Yay! Next month I'm having an LGBTQ art show with my paintings - can't wait!\nMelanie: Wow, Caroline, that sounds awesome! Can't wait to see your art - got any previews?\nCaroline: Check out my painting for the art show! Hope you like it.\nMelanie: Wow, Caroline, that painting is awesome! Those colors are so vivid and the whole thing looks really unified. What inspired you?",
+    "session_id": "conv-26_s9"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 15,
+    "turn_end": 16,
+    "text": "Caroline: Thanks, Melanie! I painted this after I visited a LGBTQ center. I wanted to capture everyone's unity and strength.\nMelanie: Wow, Caroline! It really conveys unity and strength - such a gorgeous piece! My kids and I just finished another painting like our last one.",
+    "session_id": "conv-26_s9"
+  }
+]

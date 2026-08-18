@@ -1,0 +1,24 @@
+# LoCoMo dataset configuration
+
+dataset:
+  name: "locomo"
+  path: "/Users/cyan/WYH/MedMemoryBench/data/locomo/data/locomo10.json"
+  format: "multi_speaker_sessions"
+  # Evidence format: "D{session}:{turn}" e.g. "D1:3" = session_1, turn 3
+  # Categories: 1=factual, 2=temporal, 3=reasoning, 4=multi-hop, 5=summary
+
+  # Dataset-specific parsing
+  session_key_prefix: "session_"
+  date_key_suffix: "_date_time"
+  evidence_pattern: "D(\\d+):(\\d+)"
+
+  # Filtering
+  max_samples: -1            # -1 = all
+  categories: [1, 2, 3, 4, 5]  # which QA categories to include
+  min_session_turns: 3       # skip sessions shorter than this
+
+generation:
+  output_dir: "experiment/generation/outputs/locomo"
+
+store:
+  base_dir: "experiment/store/locomo"

@@ -1,0 +1,19 @@
+# LongMemEval dataset configuration
+
+dataset:
+  name: "longmemeval"
+  path: "/Users/cyan/WYH/MedMemoryBench/data/LongMemEval/data/longmemeval-cleaned/longmemeval_s_cleaned.json"
+  format: "haystack_sessions"
+  # Structure: question + answer + answer_session_ids + haystack_sessions (multi-turn dialogues)
+  # Question types: single-session-user, multi-session, temporal-reasoning, knowledge-update, etc.
+
+  # Filtering
+  max_samples: -1
+  question_types: []   # empty = all types
+  min_session_turns: 2
+
+generation:
+  output_dir: "experiment/generation/outputs/longmemeval"
+
+store:
+  base_dir: "experiment/store/longmemeval"

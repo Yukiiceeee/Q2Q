@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 12,
+    "text": "Sam: Hey Evan, hope you're doing okay. I wanted to chat about something that's been bothering me lately... I went for a check-up Monday and my doc said my weight's a serious health risk - if I don't make changes soon, it can get worse. I know I made jokes about it, but it's really hitting me. Been having a hard time.\nEvan: Hey Sam, tough news. Yeah, our health can really put a damper on things. I started lifting weights one year ago and it's been a journey. It was a struggle at first, but I'm seeing some gains. You interested in trying it out?\nSam: Hey Evan, I'm interested in getting into it. Any advice on how to get started? Thanks!\nEvan: Hey Sam, that's awesome! It's important to start out with good form and technique. Find a trainer who can help you avoid injuries while you build your strength. Start with something small, and as you get stronger, the intensity can increase. Stay consistent with your workout routine and let me know how it goes! Good luck!\nSam: Thanks, Evan. I'm going to find someone who can help me out. I'll keep you posted!\nEvan: No problem, Sam. Can't wait to hear about your progress. Keep up the hard work!\nSam: Thanks, Evan. I appreciate your support. It really means a lot to me. I'll definitely keep you posted on my progress.\nEvan: You're welcome, Sam! It takes time, so be patient with yourself. Your health matters, and I believe in you. Keep going and stay upbeat. You got this!\nSam: Thanks, Evan. I'll stay positive and keep going. Your support means a lot.\nEvan: Hey Sam, glad I can be here for you! Progress is key, so keep pushing on and stay positive. You got this!\nSam: Wow, Evan, that's really inspiring. Gonna keep believing in it!\nEvan: Go get 'em! Believe in your abilities and you'll reach your goals. Stay motivated!\nSam: Thanks Evan! Your words gave me a boost. I'm staying motivated and believing in myself.",
+    "session_id": "conv-49_s12"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 13,
+    "turn_end": 16,
+    "text": "Evan: Awesome! Keep staying motivated and believing in yourself. You've got this!\nSam: Thanks, Evan! Your support means a lot to me.\nEvan: No prob, Sam! I'm here for you. Just keep taking one step at a time, and you'll get there eventually!\nSam: Sure, Evan. I'll take it slow. See ya!",
+    "session_id": "conv-49_s12"
+  }
+]

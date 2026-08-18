@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 15,
+    "text": "John: Hey Maria, I've been busy doing the petition I started - it's tricky but it's been cool getting back in touch with my buddies and gaining support. I got this picture of my workmates when we went on a hiking trip, they really make me keep going! What have you been up to? Anything new with your charity?\nMaria: Hey John! Cool that it's going well - you and your friends look like a great team! I'm busy at the shelter getting ready for a fundraiser next week. Hopefully, I can raise enough to cover basic needs for the homeless.\nJohn: Wow, Maria! Raising money is crucial for those in need. Is there any way I can help out with your fundraiser?\nMaria: Thanks, John! Appreciate your help. We need to get the word out about the chili cook-off at the fundraiser. Here's the poster!\nJohn: Wow, it looks awesome! I'll make sure to spread the word about it. Is there anything else I can do to assist?\nMaria: Thanks, John! Your help is really appreciated. If you know anyone who might be interested in volunteering for the event, let me know. We can do this!\nJohn: Yep, Maria! I'll ask around to see if anyone I know wants to help. We'll find some awesome people for the cause. Let's make a change!\nMaria: Way to go, John! Let's help those in need. Thanks for your support!\nJohn: No problem, Maria! Working together with passionate people like you is awesome! Let's make a difference.\nMaria: Yeah, working with passionate people like you is really motivating.\nJohn: Yeah, Maria! We're making a difference and we'll keep it up! Here's a pic of my fam at the beach.\nMaria: Wow, John, that pic is gorgeous! It really gives me hope to appreciate the little moments.\nJohn: Thanks, Maria! It's moments like these that give me hope too.\nMaria: Yeah, John! They give me peace and make me appreciate life.\nJohn: Glad the photo made you feel that way, Maria. Cherish those little moments!\nMaria: Thanks, John. I definitely will!",
+    "session_id": "conv-41_s16"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 16,
+    "turn_end": 18,
+    "text": "John: Thanks for letting me help, Maria. It's moments like these that make life worth living.\nMaria: Yep, John. These reminders help us stay motivated to make a positive impact. Well, talk to you soon!\nJohn: Yeah, Maria! We're really making progress towards making a positive impact. I believe in us! See ya!",
+    "session_id": "conv-41_s16"
+  }
+]

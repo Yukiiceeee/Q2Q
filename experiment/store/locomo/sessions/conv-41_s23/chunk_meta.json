@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 12,
+    "text": "John: Maria, since we talked, it's been tough. My old area was hit by a nasty flood last week. The infrastructure wasn't great so lots of homes were ruined. It's reminding me we need to fix things up in our community.\nMaria: Sorry to hear about what happened in your area, John. That must have been tough for you and everyone there. Is there anything I can do to help?\nJohn: Thanks a lot, Maria. Your offer means a lot to me. I'm getting people together to chat about this and discuss potential solutions. I'd really appreciate your thoughts.\n\nMaria: Hey John, I'm down to join the meeting and contribute to making our community better. Let's do this!\nJohn: Nice work, Maria! Your determination never ceases to amaze me. Let's get to work!\nMaria: Definitely, John! Your commitment to helping others is inspiring. It's great to have a friend like you who shares the same passion. Let's join forces and make the change we desire in our community.\nJohn: That means a lot, Maria. Your support and friendship mean everything. Together, we can really make a difference and motivate others too. Let's keep it up!\nMaria: John, let's keep working together to make a difference in our community. Our actions, no matter how small, can have a big impact. Let's continue to spread kindness and inspire hope.\nJohn: Definitely, little steps count! We can really make a difference together - let's do it!\nMaria: Yep, let's create a positivity ripple! Little acts of kindness and helping hands can really transform lives. Let's keep improving our community.\nJohn: Yeah, let's work hard to help those around us. We can make a difference!\nMaria: Yeah, John! Change starts small, so with hard work, we can really make something great. I'm glad to have you here.\nJohn: Thanks, Maria. Your support means a lot and it's awesome to have you by my side in our community work. Let's keep going and making great things happen!",
+    "session_id": "conv-41_s23"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 13,
+    "turn_end": 13,
+    "text": "Maria: For sure! We can keep doing great stuff and making a difference. Well, I'm off to have dinner with some friends from the gym. Talk to you later!",
+    "session_id": "conv-41_s23"
+  }
+]

@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 12,
+    "text": "Joanna: Hey Nate, how's it going? I took your reccomendation and watched \"The Lord of the Rings\" Trilogy last night! It was awesome!\nNate: Glad to hear you enjoyed it! It's probably the greatest trilogy of all time! As for me, life's been ok, just taking care of this.\nJoanna: Wow, Nate! I'm proud of what you did. Your gaming room looks great - have you been gaming a lot recently?\nNate: Gaming has been my focus - practicing a lot and even winning a few tournaments. Last week I won my second tournament!\nJoanna: Wow, congrats! What game were you playing?\nNate: Thanks! I usually play CS:GO, but I tried my hand at the local Street Fighter tournament this time since I play that game a lot with my friends, and turns out I'm really good!\nJoanna: Nice! That must have been a surprise. How did it feel to finally win one?\nNate: It was super awesome! So much adrenaline went into that last match, and the other finalist even shook my hand! Enough about me though, how about you? What have you been up to?\nJoanna: Not much is new other than the screenplay. Been working on some projects and testing out dairy-free dessert recipes for friends and fam. Here's a pic of a cake I made recently!\nNate: That looks really good! I love the way the frosting turned out!\nJoanna: Thanks! It's dairy-free vanilla with strawberry filling and coconut cream frosting. I gotta say, I really like your coconut reccomendation you gave a while back!\nNate: Wow, Joanna, that looks amazing! I bet it tastes great - you're so talented at making dairy-free desserts!\nJoanna: Thanks Nate! I really appreciate it. I love experimenting in the kitchen, coming up with something tasty. Cooking and baking are my creative outlets. Especially when I'm snackin' dairy-free, trying to make the desserts just as delicious - it's a rewarding challenge! Seeing the smiles on everyone's faces when they try it - it's a total win!",
+    "session_id": "conv-42_s10"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 13,
+    "turn_end": 15,
+    "text": "Nate: That's great, Joanna! It must be so rewarding to see everyone enjoying your creations. Keep up the good work!\nJoanna: Thanks, Nate! Appreciate all the help. Gonna keep trying new things. See ya later!\nNate: Bye!",
+    "session_id": "conv-42_s10"
+  }
+]

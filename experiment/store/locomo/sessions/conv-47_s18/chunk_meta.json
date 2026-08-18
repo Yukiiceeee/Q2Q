@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 14,
+    "text": "John: Hey James, good catching up! Been a while huh? I made a huge call - recently left my IT job after 3 years. It was tough but I wanted something that made a difference. And now with this new job, I am happy about my decision. I am loving the new job!\nJames: Hey John! Great to hear from you. Leaving after 3 years is a big step - how did it feel?\nJohn: At first, it was super scary, but I knew I had to make a change and focus on things that align with my values and passions.\nJames: Wow, John, that sounds really brave. I hope it brings you joy and satisfaction.\nJohn: Thanks, James. It wasn't easy, but sometimes you gotta take a leap to follow your heart.\nJames: Taking risks pays off! Way to be brave. I'm proud of you!\nJohn: Your support means a lot. Lately, I've been thinking about what truly makes me happy, and I'm really drawn to the gaming industry. I'm passionate about it and it's time to turn that into a career. I want to become an organizer of tournaments for various computer games in our state. For example, for CS:GO. It's a new journey for me.\nJames: Cool! You always mentioned your love for gaming. What other game do you want to organize competitions for? And what`s your plan now?\nJohn: Also, I can host Fortnite competitions. I have already made some connections that will help me with this. My plan is to gain more experience and perfect my skills to be successful in this field.\nJames: Sounds like a solid plan! Trying out different game genres can be a great way to widen your skills and knowledge.\nJohn: Thanks! I am very glad that you support me in my new endeavor!\nJames: I will always be here for you! If you need any financial assistance or advice, please contact me!\nJohn: I will definitely do this if necessary! By the way, what's new with you?\nJames: Yesterday I took my puppy to the clinic.\nJohn: God, James, what happened to your puppy? Is it OK?",
+    "session_id": "conv-47_s18"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 15,
+    "turn_end": 19,
+    "text": "James: Don't worry. This was just a routine examination. Also, the puppy was vaccinated to prevent him from catching the seasonal canine disease.\nJohn: Phew, great that he's okay. It's great that you care so much about your pets!\nJames: They are the source of my joy, so I will always take care of them!\nJohn: You're a great host, James! Well, I have to go, bye!\nJames: Thanks, John! Take care, bye!",
+    "session_id": "conv-47_s18"
+  }
+]

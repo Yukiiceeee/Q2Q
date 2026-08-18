@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 15,
+    "text": "Maria: Hey John, great news - I'm now friends with one of my fellow volunteers! We both love helping others. How have you been since we last chatted?\nJohn: Hey Maria, I've been busy with work and family, but last week I had an unexpected incident on my way home. It reminded me how life can throw unexpected troubles our way.\nMaria: Oh John, that sounds tough. I'm glad you're alright. Life does throw us some surprises, doesn't it?\n\n\nJohn: Thanks, Maria. This is a reminder to stay strong during tough times.\nMaria: Yeah John, when stuff like that happens, it's good to tap into our own inner strength. How did you handle it?\nJohn: I tried to stay calm and asked for assistance, which helped me handle the situation and make it back safely.\nMaria: Hey, John that's awesome! You really showed your resilience and resourcefulness. How did you feel afterwards?\nJohn: I felt relieved and grateful to make it through without incident.\nMaria: Yeah, it's tough. Appreciate what you've got. You got through it - stay strong. Are there any things you like to do to calm down during times like this?\nJohn: Thanks, Maria! I like to just take a look at the sunset- it reminds me to enjoy the small things in life.\nMaria: It's great to hear that you appreciate the beauty of sunsets! By the way, have there been any developments regarding your political goals?\nJohn: I've been keeping busy since we last talked! I've been looking into local politics, talking to community leaders, and getting to know the needs and hopes of our neighborhood. It's been super informative, and I'm feeling optimistic about it all.\nMaria: Wow, John! Your dedication to our community is amazing. Keep up the great work! I've been taking some notes about local politics in my notebook.\nJohn: Thanks, Maria! You're super helpful. That gives me some new ideas and plans for our community!\nMaria: Glad I could help, John. What's up next for you?\nJohn: Next week I have a community meeting coming up, we'll be discussing education and infrastructure upgrades.",
+    "session_id": "conv-41_s4"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 16,
+    "turn_end": 25,
+    "text": "Maria: Good luck on that! Hope your ideas and concerns get heard.\nJohn: Thanks, Maria! I'm hoping so. I'll definitely stick up for our community. Discussing it is important.\nMaria: Definitely, John! Talking and working together will make a great difference. You're really doing our community a service by speaking out. It's admirable and inspiring.\nJohn: Maria, thank you! Your support means a lot. Let's make some change in our community!\nMaria: Yeah, let's do it, John! Working together, we can bring positive changes to the neighborhood as a team.\nJohn: Yeah, Maria! We can achieve great things if we join forces together.\nMaria: Agreed, John! Uniting is essential for making a difference. if we stand together we can tackle any problems and build a great community.\nJohn: Yeah, Maria! I couldn't agree more. Thanks for being an awesome friend.\nMaria: No worries, John. It's really nice to help. We make a great team.\nJohn: Yup, we rock as a team! Glad to have you.",
+    "session_id": "conv-41_s4"
+  }
+]

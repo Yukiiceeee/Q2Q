@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 13,
+    "text": "Sam: Hey Evan, I need to talk to you. My friends were mocking my weight last Friday and it hurt. That made me realize I need to make changes.\nEvan: Hey Sam, sorry about that. Don't worry, progress takes time. Let's work on it together.\nSam: Thanks for the support, Evan. I'm working on my health and getting active!\nEvan: That's great, Sam! I struggled with my health a few years ago, but stuck with it. Here's a reminder of my commitment - my gym membership card. It's not just about exercise, diet and lifestyle changes also play a big role.\nSam: That's awesome, Evan! What do you think made the biggest impact on your health journey?\nEvan: I made some dietary changes, like cutting down on sugary snacks and eating more veggies and fruit, and it made a big impact on my health. Have you considered any changes?\nSam: Yep, I'm reducing my soda and candy intake. It's tough, but I'm determined to make a change.\nEvan: Go for it, Sam! It's tough at first, but you got this. Try flavored seltzer water instead. It can be a great alternative to soda. Btw I can't stop thinking about that new mystery novel I started. It's so gripping!\nSam: Sounds good, Evan. I've tried it before and it was nice. Do you have any ideas for low-calorie snacks to pair with it? And what's the novel?\nEvan: Definitely, how about some flavored seltzer with some air-popped popcorn or fruit? It's yum and healthy! The novel I'm reading is \"The Great Gatsby\".\nSam: Yum, that sounds good! Thanks! And I'll definitely read that novel sometime.\nEvan: No worries, Sam! Focus on healthy swaps and taking small steps. Stay upbeat!\nSam: That reminder is inspiring. Thanks for reminding me to focus on progress, not perfection.\nEvan: By the way, have you thought about exercising? Trust me, it's just as important as eating right.",
+    "session_id": "conv-49_s4"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 14,
+    "turn_end": 19,
+    "text": "Sam: Starting tomorrow, I will go to the gym and exercise regularly. The sooner I start, the sooner I will see the rewards of this activity.\nEvan: That's awesome, Sam! It's such a rewarding and tough activity - keep going and have fun!\nSam: Thanks, Evan! Your support means a lot. I really appreciate it.\nEvan: No worries, you've got this!\nSam: Thanks, Evan. I really appreciate it.\nEvan: No worries, Sam. I'm here if you need me. Keep going!",
+    "session_id": "conv-49_s4"
+  }
+]

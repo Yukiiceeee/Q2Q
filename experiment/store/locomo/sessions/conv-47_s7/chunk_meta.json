@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 15,
+    "text": "John: Hey James! How's it going?\nJames: Hey John! Good to hear from ya. Yeah, been crazy. Last Thursday I took my dogs out for a hike. Was quite the adventure! Explored some nice trails and enjoyed fresh air.\nJohn: Wow, sounds like quite an adventure! Do you have any pictures from that day?\nJames: Yeah, I have one. It was great! They loved it - so many trails to discover and amazing views. So fun!\nJohn: Wow, that looks like a cool place you took them! Why'd you pick that spot?\nJames: I picked that spot because it had great views and lots of trails. It was perfect for them to explore nature and have fun. Plus, there's nothing like being surrounded by lush greenery and clean air.\nJohn: Agreed! It is a great way to escape the everyday. Wish I could spend more time in nature!\nJames: Love hearing the crunch of leaves under my feet and the peacefulness. It helps me clear my head and chill.\nJohn: I need some chill vibes too because it's been crazy for me lately.\nJames: What's been going on? Is there anything you want to talk about? I'm here for you.\nJohn: Thanks, James. Yeah, been super busy at work. Deadlines all over the place and so much to do. It's just been really hectic lately.\nJames: Yeah, work can be tough. Is there something specific that's making it worse?\nJohn: Ugh, this project is giving me a hard time. It's a difficult assignment that involves coding and I'm stuck on it. It's frustrating because I hate being stuck and not making progress.\nJames: Yeah, it's really frustrating when a project doesn't go as planned. What specifically is giving you trouble? Maybe I can offer some assistance.\nJohn: This coding is really tough. I'm working on something complicated and it's not going well. I've been staring at it for ages and I feel like I'm getting nowhere.\nJames: Gotcha, what's the problem with the project? Need a hand figuring out some ideas?",
+    "session_id": "conv-47_s7"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 16,
+    "turn_end": 20,
+    "text": "John: Yeah, that'd be great. I'm trying to make this new algorithm work better, but I'm stuck. Do you have any ideas?\nJames: Not sure about your algorithm, but breaking it down into smaller steps might help. Doing some research on similar algorithms or asking other programmers for advice could be beneficial. Don't be afraid to seek help and remember, every problem has a solution.\nJohn: Yep, breaking it down into smaller steps and asking for help can definitely be helpful. I'll give it a try. Thanks for the advice, James. Much appreciated.\nJames: No problem John. Glad to help. You got this. Keep going and you'll find the answer.\nJohn:  Your words really helped. I won't quit. Gonna keep going. Cheers! \n",
+    "session_id": "conv-47_s7"
+  }
+]

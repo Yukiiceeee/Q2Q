@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_index": 0,
+    "turn_start": 0,
+    "turn_end": 13,
+    "text": "John: Hey Maria, great chatting with you again! Crazy thing happened since we last talked. I lost my job at the mechanical engineering company. They tanked and it's been really rough. Never saw this coming.\nMaria: Sorry to hear about your job, John. I can only imagine how tough it must be. How are you holding up?\nJohn: Thanks for your care, Maria. It's been tough but I'm trying to stay up. I've been looking into some opportunities in the tech industry for a while now. Maybe this is the change I need, you gave me the push!\nMaria: Hey John, glad you're looking into other avenues. Any promising leads come up?\nJohn: Thanks Maria! I may have found a job at a tech company I like that needs my mechanical skills for their hardware team. It feels different, but I think it's a great opportunity to learn and contribute.\nMaria: Wow, John, that sounds like the perfect job for you! You're so adaptable, I'm sure you'll do great. Good luck!\nJohn: Thanks, Maria! I appreciate your support, it really means a lot.\nMaria: Hey John, I'm here for you! Staying positive makes a big difference, even in tough times. Yesterday, I took up some community work with my friends from church. It was super rewarding!\nJohn: Wow, Maria! That's great. Glad it was rewarding for you.\nMaria: Thanks, John! These moments remind me of how important kindness and compassion are. Have you had any volunteer experiences you'd like to share?\nJohn: I haven't been able to volunteer much lately, but I definitely care about it. Last year, I helped renovate a rundown community center back home. It took a lot of work, but seeing the impact on the community was so worth it.\nMaria: John, that's great! Must be really satisfying to witness the positive effect it's having on your hometown.\nJohn: Yeah! It was really cool to see everyone come together and help out - it's been amazing to see it so busy!\nMaria: Wow, John, awesome job! Keep doing what you're doing - you're making a real difference!",
+    "session_id": "conv-41_s28"
+  },
+  {
+    "chunk_index": 1,
+    "turn_start": 14,
+    "turn_end": 18,
+    "text": "John: It's really encouraging to hear that. I'll keep pushing forward and doing my best.\nMaria: You got this! You're inspiring and keep making a difference.\nJohn: I appreciate it! Your words are really motivating.\nMaria: No worries, John. I'm here to support you. If there's anything else I can do, just let me know.\nJohn: Thanks, Maria. Your support means a lot to me. If I need anything, I'll be sure to reach out.",
+    "session_id": "conv-41_s28"
+  }
+]
