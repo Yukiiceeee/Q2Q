@@ -16,6 +16,9 @@ class AlignmentResult:
     best_fq_text: str = ""
     best_fq_idx: int = -1
     best_chunk_idx: int = -1
+    sim_q2p: float = 0.0
+    sim_q2n: float = 0.0
+    sim_q2r: float = 0.0
 
 
 @dataclass
@@ -29,9 +32,34 @@ class RobustnessResult:
     var_q2c: float = 0.0
     robustness_q2q: float = 0.0
     robustness_q2c: float = 0.0
+    original_sim_q2p: float = 0.0
+    original_sim_q2n: float = 0.0
+    original_sim_q2r: float = 0.0
+    paraphrase_sims_q2p: dict[str, float] = field(default_factory=dict)
+    paraphrase_sims_q2n: dict[str, float] = field(default_factory=dict)
+    paraphrase_sims_q2r: dict[str, float] = field(default_factory=dict)
+    var_q2p: float = 0.0
+    var_q2n: float = 0.0
+    var_q2r: float = 0.0
+    robustness_q2p: float = 0.0
+    robustness_q2n: float = 0.0
+    robustness_q2r: float = 0.0
 
 
 class AlignmentMetrics:
+
+    @staticmethod
+    def compute_max_sim(
+        query_emb: np.ndarray,
+        embeddings: np.ndarray,
+    ) -> tuple[float, int]:
+        if embeddings is not None and len(embeddings) > 0:
+            sims = embeddings @ query_emb / (
+                np.linalg.norm(embeddings, axis=1) * np.linalg.norm(query_emb) + 1e-10
+            )
+            best_idx = int(np.argmax(sims))
+            return float(sims[best_idx]), best_idx
+        return 0.0, -1
 
     @staticmethod
     def compute_alignment(
@@ -44,26 +72,8 @@ class AlignmentMetrics:
         Returns:
             (sim_q2q, best_fq_idx, sim_q2c, best_chunk_idx)
         """
-        # Q2Q: max cosine similarity with any fake query
-        if fq_embeddings is not None and len(fq_embeddings) > 0:
-            sims_q2q = fq_embeddings @ query_emb / (
-                np.linalg.norm(fq_embeddings, axis=1) * np.linalg.norm(query_emb) + 1e-10
-            )
-            best_fq_idx = int(np.argmax(sims_q2q))
-            sim_q2q = float(sims_q2q[best_fq_idx])
-        else:
-            sim_q2q, best_fq_idx = 0.0, -1
-
-        # Q2C: max cosine similarity with any content chunk
-        if content_embeddings is not None and len(content_embeddings) > 0:
-            sims_q2c = content_embeddings @ query_emb / (
-                np.linalg.norm(content_embeddings, axis=1) * np.linalg.norm(query_emb) + 1e-10
-            )
-            best_chunk_idx = int(np.argmax(sims_q2c))
-            sim_q2c = float(sims_q2c[best_chunk_idx])
-        else:
-            sim_q2c, best_chunk_idx = 0.0, -1
-
+        sim_q2q, best_fq_idx = AlignmentMetrics.compute_max_sim(query_emb, fq_embeddings)
+        sim_q2c, best_chunk_idx = AlignmentMetrics.compute_max_sim(query_emb, content_embeddings)
         return sim_q2q, best_fq_idx, sim_q2c, best_chunk_idx
 
     @staticmethod
@@ -150,3 +160,46 @@ class AlignmentMetrics:
             cat: AlignmentMetrics.paired_statistics(items)
             for cat, items in cat_map.items()
         }
+
+    @staticmethod
+    def multi_paired_statistics(sims_dict: dict[str, list[float]]) -> dict:
+        """Compute pairwise statistics for all method pairs.
+
+        Args:
+            sims_dict: Mapping method_name -> list of per-query similarities,
+                       e.g. {"q2q": [...], "q2c": [...], "q2p": [...], ...}
+
+        Returns:
+            Dict with per-method stats and pairwise comparisons.
+        """
+        methods = list(sims_dict.keys())
+        result = {}
+
+        for m in methods:
+            arr = np.array(sims_dict[m])
+            result[m] = {
+                "mean": float(np.mean(arr)),
+                "std": float(np.std(arr)),
+                "median": float(np.median(arr)),
+            }
+
+        pairwise = {}
+        for i, ma in enumerate(methods):
+            for mb in methods[i + 1:]:
+                a = np.array(sims_dict[ma])
+                b = np.array(sims_dict[mb])
+                diff = a - b
+                t_stat, p_val = stats.ttest_rel(a, b)
+                d = float(np.mean(diff) / (np.std(diff, ddof=1) + 1e-10))
+                win_a = int(np.sum(diff > 0))
+                win_b = int(np.sum(diff < 0))
+                pairwise[f"{ma}_vs_{mb}"] = {
+                    "t_statistic": float(t_stat),
+                    "p_value": float(p_val),
+                    "cohens_d": d,
+                    f"{ma}_wins": win_a,
+                    f"{mb}_wins": win_b,
+                    f"{ma}_win_rate": win_a / len(a) if len(a) > 0 else 0,
+                }
+        result["pairwise"] = pairwise
+        return result

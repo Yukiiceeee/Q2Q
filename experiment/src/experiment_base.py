@@ -14,6 +14,7 @@ import yaml
 from experiment.embedding import create_embedding_provider, BaseEmbedding
 from experiment.store import EmbeddingStore
 from experiment.src.data_loader import BaseDataLoader, load_dataset
+from experiment.src.experiment_logger import ExperimentLogger
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,17 @@ class ExperimentBase(ABC):
             self.base_config.get("experiment", {}).get("results_dir", "experiment/results")
         )
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.figs_dir = Path("experiment/figs") / self.dataset_config["dataset"]["name"]
+        self.figs_dir.mkdir(parents=True, exist_ok=True)
+
+        self.exp_logger = ExperimentLogger(
+            experiment_name=self.__class__.__name__,
+            dataset_name=self.dataset_config["dataset"]["name"],
+            config={
+                "embedding": self.base_config["embedding"],
+                "experiment": self.base_config.get("experiment", {}),
+            },
+        )
 
     def load_data(self) -> BaseDataLoader:
         if self.data_loader is None:
@@ -84,6 +96,16 @@ class ExperimentBase(ABC):
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2, default=str)
         logger.info(f"Results saved to {out_path}")
+        return out_path
+
+    def save_experiment_log(self, results: dict, filename: str) -> Path:
+        log_data = self.exp_logger.finalize(results)
+        out_dir = self.results_dir / self.dataset_config["dataset"]["name"]
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / filename
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, ensure_ascii=False, indent=2, default=str)
+        logger.info(f"Experiment log saved to {out_path}")
         return out_path
 
     def _load_yaml(self, path: str) -> dict:

@@ -60,7 +60,7 @@ def setup_logging(level: str = "INFO", dataset_name: str = "", step: str = ""):
 async def step_generate(base_config: dict, dataset_config: dict) -> None:
     """Generate fake queries and indirect queries for all sessions/queries."""
     from experiment.src.data_loader import load_dataset
-    from experiment.generation import ExperimentFQGenerator, IndirectQueryGenerator
+    from experiment.generation import ExperimentFQGenerator, IndirectQueryGenerator, NoteGenerator
     from src.utils.llm_client import create_llm_client
 
     logger = logging.getLogger(__name__)
@@ -144,6 +144,26 @@ async def step_generate(base_config: dict, dataset_config: dict) -> None:
     t0 = time.time()
     await indirect_gen.generate_for_queries(queries_with_context, dataset_name)
     logger.info(f"Indirect query generation completed in {time.time()-t0:.1f}s")
+
+    # --- Phase C: Generate memory note variants ---
+    from experiment.generation.prompts.note_prompt import NOTE_VARIANT_STYLES
+
+    for style in NOTE_VARIANT_STYLES:
+        print(f"\n{'='*60}")
+        print(f"  Phase C: Generating {style.title()}s ({dataset_name})")
+        print(f"{'='*60}\n")
+
+        note_gen = NoteGenerator(
+            llm_client=llm_client,
+            language=gen_cfg.get("language", "en"),
+            output_dir=output_dir,
+            max_concurrent=gen_cfg.get("max_concurrent", 5),
+            save_interval=gen_cfg.get("save_interval", 10),
+        )
+
+        t0 = time.time()
+        await note_gen.generate_for_dataset(target_sessions, dataset_name, style=style)
+        logger.info(f"{style.title()} generation completed in {time.time()-t0:.1f}s")
 
     print("\n  Generation complete.\n")
 
@@ -266,15 +286,71 @@ async def step_embed(base_config: dict, dataset_config: dict) -> None:
     else:
         logger.info(f"No indirect queries at {iq_path} (optional for Exp1).")
 
+    # 5. Embed memory note variants (propositions / notes / reflections)
+    variant_map = {
+        "proposition": "propositions",
+        "note": "notes",
+        "reflection": "reflections",
+    }
+    for style, store_name in variant_map.items():
+        vpath = Path(gen_output_dir) / f"{dataset_name}_{style}s.json"
+        if not vpath.exists():
+            logger.info(f"No {style}s at {vpath}, skipping.")
+            continue
+
+        with open(vpath, "r", encoding="utf-8") as f:
+            variant_data = json.load(f)
+
+        to_embed = [
+            (sid, items)
+            for sid, items in variant_data.items()
+            if not store.has_variant(store_name, sid) and items
+        ]
+        logger.info(f"{style.title()}s to embed: {len(to_embed)} sessions")
+        t0 = time.time()
+        for i, (sid, items) in enumerate(to_embed):
+            if style == "note":
+                texts = [
+                    f"{item['title']}. {item.get('key_insight', '')} {item.get('content', '')}"
+                    for item in items
+                    if isinstance(item, dict) and item.get("title")
+                ]
+            else:
+                texts = [str(item).strip() for item in items if str(item).strip()]
+            if texts:
+                embeddings = await provider.embed_batch(texts)
+                store.save_variant(store_name, sid, embeddings, texts)
+            if (i + 1) % 20 == 0:
+                logger.info(f"  {style.title()} embeddings: {i+1}/{len(to_embed)}")
+        logger.info(f"  {style.title()} embeddings done ({time.time()-t0:.1f}s)")
+
     store.close()
     print("\n  Embedding step complete.\n")
 
 
 async def step_exp1(base_config: dict, dataset_config: dict, args) -> None:
-    """Run Experiment 1: Basic Alignment Comparison."""
+    """Run Experiment 1: Spatial Distribution Consistency."""
     from experiment.src.exp1_alignment import Exp1Alignment
 
     exp = Exp1Alignment(args.config, args.dataset)
+    await exp.run()
+    exp.store.close()
+
+
+async def step_exp2(base_config: dict, dataset_config: dict, args) -> None:
+    """Run Experiment 2: Robustness Analysis."""
+    from experiment.src.exp2_robustness import Exp2Robustness
+
+    exp = Exp2Robustness(args.config, args.dataset)
+    await exp.run()
+    exp.store.close()
+
+
+async def step_exp3(base_config: dict, dataset_config: dict, args) -> None:
+    """Run Experiment 3: Temporal Drift Verification."""
+    from experiment.src.exp3_temporal_drift import Exp3TemporalDrift
+
+    exp = Exp3TemporalDrift(args.config, args.dataset)
     await exp.run()
     exp.store.close()
 
@@ -337,10 +413,16 @@ async def async_main():
         await step_embed(base_config, dataset_config)
     elif args.step == "exp1":
         await step_exp1(base_config, dataset_config, args)
+    elif args.step == "exp2":
+        await step_exp2(base_config, dataset_config, args)
+    elif args.step == "exp3":
+        await step_exp3(base_config, dataset_config, args)
     elif args.step == "all":
         await step_generate(base_config, dataset_config)
         await step_embed(base_config, dataset_config)
         await step_exp1(base_config, dataset_config, args)
+        await step_exp2(base_config, dataset_config, args)
+        await step_exp3(base_config, dataset_config, args)
     else:
         print(f"Step '{args.step}' not yet implemented.")
 
