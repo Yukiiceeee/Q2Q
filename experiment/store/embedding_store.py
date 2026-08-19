@@ -176,5 +176,45 @@ class EmbeddingStore:
             return [d.name for d in path.iterdir() if d.is_dir()]
         return []
 
+    # --- Variant methods (propositions / notes / reflections) ---
+
+    def save_variant(
+        self,
+        variant: str,
+        session_id: str,
+        embeddings: list[np.ndarray],
+        texts: list[str],
+    ) -> None:
+        if not embeddings:
+            return
+        path = self.base_dir / variant / session_id
+        path.mkdir(parents=True, exist_ok=True)
+        data = np.stack(embeddings, axis=0).astype(np.float32)
+        np.save(path / "embeddings.npy", data)
+        with open(path / "texts.json", "w", encoding="utf-8") as f:
+            json.dump(texts, f, ensure_ascii=False)
+
+    def get_variant_embeddings(
+        self, variant: str, session_id: str
+    ) -> np.ndarray | None:
+        path = self.base_dir / variant / session_id / "embeddings.npy"
+        if path.exists():
+            return np.load(path)
+        return None
+
+    def get_variant_texts(
+        self, variant: str, session_id: str
+    ) -> list[str] | None:
+        path = self.base_dir / variant / session_id / "texts.json"
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return None
+
+    def has_variant(self, variant: str, session_id: str) -> bool:
+        return (
+            self.base_dir / variant / session_id / "embeddings.npy"
+        ).exists()
+
     def close(self):
         pass

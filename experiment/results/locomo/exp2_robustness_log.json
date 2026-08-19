@@ -1,0 +1,73 @@
+{
+  "experiment_name": "Exp2Robustness",
+  "dataset_name": "locomo",
+  "start_time": "2026-08-19T07:47:41.289942+00:00",
+  "end_time": "2026-08-19T07:47:45.736869+00:00",
+  "total_elapsed_seconds": 4.447,
+  "config": {
+    "embedding": {
+      "provider": "local",
+      "model_name": "/Users/cyan/WYH/models/bge-large-en-v1.5",
+      "device": "cpu",
+      "dimension": 1024,
+      "max_seq_length": 512,
+      "batch_size": 32,
+      "api_key": "sk-8b9a92f7a5cd4038a189d3708c5f865e",
+      "base_url": "https://matrixllm.alipay.com/v1"
+    },
+    "experiment": {
+      "seed": 42,
+      "results_dir": "experiment/results",
+      "log_level": "INFO"
+    }
+  },
+  "phases": [
+    {
+      "name": "embeddings",
+      "elapsed_seconds": 0.035,
+      "metadata": {}
+    },
+    {
+      "name": "robustness",
+      "elapsed_seconds": 2.335,
+      "metadata": {
+        "n_queries": 1982
+      }
+    },
+    {
+      "name": "statistics",
+      "elapsed_seconds": 0.276,
+      "metadata": {}
+    },
+    {
+      "name": "visualization",
+      "elapsed_seconds": 1.788,
+      "metadata": {}
+    }
+  ],
+  "results_summary": {
+    "experiment": "exp2_robustness",
+    "dataset": "locomo",
+    "n_queries": 1982,
+    "elapsed_seconds": 4.45,
+    "overall": {
+      "var_q2q_mean": 0.0017080817523341593,
+      "robustness_q2q_mean": 0.790341734247441,
+      "robustness_q2q_std": 0.10862882320616288,
+      "var_q2p_mean": 0.0,
+      "robustness_q2p_mean": 1.0,
+      "robustness_q2p_std": 0.0,
+      "var_q2n_mean": 0.0,
+      "robustness_q2n_mean": 1.0,
+      "robustness_q2n_std": 0.0,
+      "var_q2r_mean": 0.0,
+      "robustness_q2r_mean": 1.0,
+      "robustness_q2r_std": 0.0,
+      "var_q2c_mean": 0.001471669705742493,
+      "robustness_q2c_mean": 0.8466890473016017,
+      "robustness_q2c_std": 0.09070661199280808,
+      "n_samples": 1982,
+      "variance_ratio_q2c_over_q2q": 0.8615920271803134
+    }
+  }
+}
