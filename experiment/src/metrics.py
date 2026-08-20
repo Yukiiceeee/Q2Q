@@ -203,3 +203,58 @@ class AlignmentMetrics:
                 }
         result["pairwise"] = pairwise
         return result
+
+    @staticmethod
+    def compute_directional_alignment(
+        query_emb: np.ndarray,
+        content_centroid: np.ndarray,
+        method_embs: np.ndarray,
+    ) -> float:
+        """Compute directional alignment: how well a method's best-match
+        direction from content centroid aligns with the true query direction.
+
+        Measures whether the method captures the *intent direction* — the
+        displacement from general content toward the specific query need.
+
+        Returns cosine similarity between the two direction vectors.
+        """
+        if method_embs is None or len(method_embs) == 0:
+            return 0.0
+        q_norm = query_emb / (np.linalg.norm(query_emb) + 1e-10)
+        c_norm = content_centroid / (np.linalg.norm(content_centroid) + 1e-10)
+
+        intent_dir = q_norm - c_norm
+        intent_norm = np.linalg.norm(intent_dir)
+        if intent_norm < 1e-8:
+            return 1.0
+        intent_dir = intent_dir / intent_norm
+
+        sims = method_embs @ q_norm / (
+            np.linalg.norm(method_embs, axis=1) + 1e-10
+        )
+        best_idx = int(np.argmax(sims))
+        best_emb = method_embs[best_idx]
+        best_norm = best_emb / (np.linalg.norm(best_emb) + 1e-10)
+
+        method_dir = best_norm - c_norm
+        method_norm = np.linalg.norm(method_dir)
+        if method_norm < 1e-8:
+            return 0.0
+        method_dir = method_dir / method_norm
+
+        return float(intent_dir @ method_dir)
+
+    @staticmethod
+    def compute_discriminability(
+        query_emb: np.ndarray,
+        positive_embs: np.ndarray,
+        negative_embs: np.ndarray,
+    ) -> float:
+        """Compute semantic discriminability: difference between max similarity
+        to the correct session and max similarity to a distractor session.
+
+        Positive value means the method correctly ranks the target higher.
+        """
+        pos_sim, _ = AlignmentMetrics.compute_max_sim(query_emb, positive_embs)
+        neg_sim, _ = AlignmentMetrics.compute_max_sim(query_emb, negative_embs)
+        return pos_sim - neg_sim

@@ -311,7 +311,7 @@ async def step_embed(base_config: dict, dataset_config: dict) -> None:
         for i, (sid, items) in enumerate(to_embed):
             if style == "note":
                 texts = [
-                    f"{item['title']}. {item.get('key_insight', '')} {item.get('content', '')}"
+                    f"{item['title']}. {item.get('key_insight') or ''} {item.get('content') or ''}".strip()
                     for item in items
                     if isinstance(item, dict) and item.get("title")
                 ]

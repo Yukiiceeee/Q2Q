@@ -85,10 +85,25 @@ class Exp1Alignment(ExperimentBase):
         self.exp_logger.end_phase("cluster_analysis")
 
         self.exp_logger.start_phase("visualization")
-        tsne_path = self._visualize_tsne(loader, n_samples=150)
+        tsne_paths = self._visualize_tsne(loader, n_samples=150)
         gap_path = self._plot_gap_distribution(results)
         bar_path = self._plot_method_comparison(results)
         self.exp_logger.end_phase("visualization")
+
+        self.exp_logger.start_phase("directional_alignment")
+        dir_stats = self._compute_directional_alignment(loader)
+        dir_fig = self._plot_directional_alignment(dir_stats)
+        self.exp_logger.end_phase("directional_alignment")
+
+        self.exp_logger.start_phase("discriminability")
+        disc_stats = self._compute_discriminability(loader)
+        disc_fig = self._plot_discriminability(disc_stats)
+        self.exp_logger.end_phase("discriminability")
+
+        self.exp_logger.start_phase("precision_at_k")
+        prec_stats = self._compute_precision_at_k(loader)
+        prec_fig = self._plot_precision_at_k(prec_stats)
+        self.exp_logger.end_phase("precision_at_k")
 
         elapsed = time.time() - start_time
         output = {
@@ -101,10 +116,17 @@ class Exp1Alignment(ExperimentBase):
             "by_category": category_stats,
             "distance_matrix": dist_stats,
             "cluster_analysis": cluster_stats,
+            "directional_alignment": dir_stats,
+            "discriminability": disc_stats,
+            "precision_at_k": prec_stats,
             "figures": {
-                "tsne": str(tsne_path),
+                "tsne_all": str(tsne_paths.get("tsne_all", "")),
+                "tsne_nearest": str(tsne_paths.get("tsne_nearest", "")),
                 "gap_distribution": str(gap_path),
                 "method_comparison": str(bar_path),
+                "directional_alignment": str(dir_fig),
+                "discriminability": str(disc_fig),
+                "precision_at_k": str(prec_fig),
             },
             "sample_results": [
                 {
@@ -369,11 +391,11 @@ class Exp1Alignment(ExperimentBase):
         return result
 
     # ------------------------------------------------------------------ #
-    #  t-SNE Visualization (6 types)                                     #
+    #  t-SNE Visualization (2 figures × 4 subplots)                     #
     # ------------------------------------------------------------------ #
 
-    def _visualize_tsne(self, loader, n_samples: int = 150) -> Path:
-        logger.info("Phase 6a: t-SNE visualization (6 types)...")
+    def _visualize_tsne(self, loader, n_samples: int = 150) -> dict[str, Path]:
+        logger.info("Phase 6a: t-SNE visualization (2 figures × 4 subplots)...")
         seed = self.base_config.get("experiment", {}).get("seed", 42)
         rng = np.random.RandomState(seed)
 
@@ -381,7 +403,9 @@ class Exp1Alignment(ExperimentBase):
             len(loader.queries), size=min(n_samples, len(loader.queries)), replace=False
         )
 
-        all_vecs, all_labels = [], []
+        # label: 0=TQ, 1=FQ, 2=Content, 3=Proposition, 4=Note, 5=Reflection
+        all_vecs, all_labels, query_group = [], [], []
+        qidx = 0
         for idx in sampled_queries:
             q = loader.queries[idx]
             tq_emb = self.store.get_true_query_embedding(q.query_id)
@@ -395,76 +419,189 @@ class Exp1Alignment(ExperimentBase):
 
             all_vecs.append(tq_emb)
             all_labels.append(0)
+            query_group.append(qidx)
+
             for v in fq_embs:
                 all_vecs.append(v)
                 all_labels.append(1)
+                query_group.append(qidx)
+
             for v in c_embs:
                 all_vecs.append(v)
                 all_labels.append(2)
+                query_group.append(qidx)
+
             for label_id, store_name in [(3, "propositions"), (4, "notes"), (5, "reflections")]:
                 v_embs = self.store.get_variant_embeddings(store_name, sid)
                 if v_embs is not None:
                     for v in v_embs:
                         all_vecs.append(v)
                         all_labels.append(label_id)
+                        query_group.append(qidx)
+
+            qidx += 1
 
         X = np.array(all_vecs, dtype=np.float32)
         labels = np.array(all_labels)
+        groups = np.array(query_group)
 
         tsne = TSNE(n_components=2, perplexity=30, random_state=seed, max_iter=1000)
         X_2d = tsne.fit_transform(X)
 
-        fig, ax = plt.subplots(1, 1, figsize=(12, 9))
-        for name, cfg in reversed(list(EMBED_TYPES.items())):
-            mask = labels == cfg["id"]
-            if not np.any(mask):
-                continue
+        tq_indices = np.where(labels == 0)[0]
+        nearest_masks = {}
+        for baseline_label in [1, 2, 3, 4, 5]:
+            keep = set()
+            for tq_idx in tq_indices:
+                grp = groups[tq_idx]
+                candidates = np.where((labels == baseline_label) & (groups == grp))[0]
+                if len(candidates) == 0:
+                    continue
+                dists = np.linalg.norm(X_2d[candidates] - X_2d[tq_idx], axis=1)
+                keep.add(candidates[np.argmin(dists)])
+            nearest_masks[baseline_label] = keep
+
+        subplot_cfgs = [
+            ("TQ vs FQ vs Content", [(1, "#2196F3", "Fake Query"), (2, "#FF9800", "Content")]),
+            ("TQ vs FQ vs Proposition", [(1, "#2196F3", "Fake Query"), (3, "#9C27B0", "Proposition")]),
+            ("TQ vs FQ vs Note", [(1, "#2196F3", "Fake Query"), (4, "#E91E63", "Note")]),
+            ("TQ vs FQ vs Reflection", [(1, "#2196F3", "Fake Query"), (5, "#009688", "Reflection")]),
+        ]
+
+        paths = {}
+
+        # --- Figure 1: All points ---
+        fig1, axes1 = plt.subplots(1, 4, figsize=(28, 6))
+        for i, (title, baselines) in enumerate(subplot_cfgs):
+            ax = axes1[i]
+            for bl_label, bl_color, bl_name in reversed(baselines):
+                mask = labels == bl_label
+                if np.any(mask):
+                    ax.scatter(
+                        X_2d[mask, 0], X_2d[mask, 1],
+                        c=bl_color, s=8, alpha=0.3, edgecolors="none",
+                        label=bl_name, zorder=2,
+                    )
+            tq_mask = labels == 0
             ax.scatter(
-                X_2d[mask, 0], X_2d[mask, 1],
-                c=cfg["color"], label=cfg["label"],
-                s=cfg["size"], alpha=cfg["alpha"], edgecolors="none",
+                X_2d[tq_mask, 0], X_2d[tq_mask, 1],
+                c="#E53935", s=28, alpha=0.85, edgecolors="white",
+                linewidths=0.3, label="True Query", zorder=3,
             )
+            ax.set_title(title, fontsize=13, fontweight="bold")
+            ax.legend(fontsize=9, loc="upper right", framealpha=0.8)
+            ax.set_xticks([])
+            ax.set_yticks([])
 
-        ax.set_title("Embedding Space: TQ / FQ / C / P / N / R (t-SNE)", fontsize=14)
-        ax.legend(fontsize=10, loc="best")
-        ax.set_xlabel("t-SNE dim 1")
-        ax.set_ylabel("t-SNE dim 2")
-        plt.tight_layout()
+        fig1.suptitle("Embedding Space — All Points (t-SNE)", fontsize=15, y=1.02)
+        fig1.tight_layout()
+        p1 = self.figs_dir / "exp1_tsne_all.png"
+        fig1.savefig(p1, dpi=300, bbox_inches="tight")
+        plt.close(fig1)
+        paths["tsne_all"] = p1
+        logger.info(f"  t-SNE (all) saved to {p1}")
 
-        out_path = self.figs_dir / "exp1_tsne.png"
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"  t-SNE saved to {out_path}")
-        return out_path
+        # --- Figure 2: Nearest neighbor only ---
+        fig2, axes2 = plt.subplots(1, 4, figsize=(28, 6))
+        for i, (title, baselines) in enumerate(subplot_cfgs):
+            ax = axes2[i]
+            for bl_label, bl_color, bl_name in reversed(baselines):
+                keep_set = nearest_masks[bl_label]
+                keep_idx = np.array(sorted(keep_set)) if keep_set else np.array([], dtype=int)
+                if len(keep_idx) > 0:
+                    ax.scatter(
+                        X_2d[keep_idx, 0], X_2d[keep_idx, 1],
+                        c=bl_color, s=18, alpha=0.65, edgecolors="none",
+                        label=bl_name, zorder=2,
+                    )
+            tq_mask = labels == 0
+            ax.scatter(
+                X_2d[tq_mask, 0], X_2d[tq_mask, 1],
+                c="#E53935", s=28, alpha=0.85, edgecolors="white",
+                linewidths=0.3, label="True Query", zorder=3,
+            )
+            for tq_idx in tq_indices:
+                for bl_label, bl_color, _ in baselines:
+                    grp = groups[tq_idx]
+                    candidates = np.where((labels == bl_label) & (groups == grp))[0]
+                    if len(candidates) == 0:
+                        continue
+                    dists = np.linalg.norm(X_2d[candidates] - X_2d[tq_idx], axis=1)
+                    nn_idx = candidates[np.argmin(dists)]
+                    ax.plot(
+                        [X_2d[tq_idx, 0], X_2d[nn_idx, 0]],
+                        [X_2d[tq_idx, 1], X_2d[nn_idx, 1]],
+                        color=bl_color, linewidth=0.4, alpha=0.25, zorder=1,
+                    )
+            ax.set_title(title + " (nearest)", fontsize=13, fontweight="bold")
+            ax.legend(fontsize=9, loc="upper right", framealpha=0.8)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+        fig2.suptitle("Embedding Space — Nearest Neighbor per Query (t-SNE)", fontsize=15, y=1.02)
+        fig2.tight_layout()
+        p2 = self.figs_dir / "exp1_tsne_nearest.png"
+        fig2.savefig(p2, dpi=300, bbox_inches="tight")
+        plt.close(fig2)
+        paths["tsne_nearest"] = p2
+        logger.info(f"  t-SNE (nearest) saved to {p2}")
+
+        return paths
 
     # ------------------------------------------------------------------ #
     #  Gap Distribution (4 overlaid histograms)                          #
     # ------------------------------------------------------------------ #
 
     def _plot_gap_distribution(self, results: list[AlignmentResult]) -> Path:
-        logger.info("Phase 6b: Gap distribution visualization (4 gaps)...")
+        logger.info("Phase 6b: Gap distribution visualization (violin + strip)...")
         dataset_name = self.dataset_config["dataset"]["name"]
 
-        gaps = {
-            "Q2Q - Q2C": ([r.sim_q2q - r.sim_q2c for r in results], METHOD_COLORS["Q2C"]),
-            "Q2Q - Q2P": ([r.sim_q2q - r.sim_q2p for r in results], METHOD_COLORS["Q2P"]),
-            "Q2Q - Q2N": ([r.sim_q2q - r.sim_q2n for r in results], METHOD_COLORS["Q2N"]),
-            "Q2Q - Q2R": ([r.sim_q2q - r.sim_q2r for r in results], METHOD_COLORS["Q2R"]),
-        }
+        gap_labels = ["Q2Q−Q2C", "Q2Q−Q2P", "Q2Q−Q2N", "Q2Q−Q2R"]
+        gap_colors = ["#FF9800", "#9C27B0", "#E91E63", "#009688"]
+        gap_data = [
+            np.array([r.sim_q2q - r.sim_q2c for r in results]),
+            np.array([r.sim_q2q - r.sim_q2p for r in results]),
+            np.array([r.sim_q2q - r.sim_q2n for r in results]),
+            np.array([r.sim_q2q - r.sim_q2r for r in results]),
+        ]
 
-        fig, ax = plt.subplots(1, 1, figsize=(12, 6))
-        for label, (vals, color) in gaps.items():
-            arr = np.array(vals)
-            ax.hist(
-                arr, bins=50, color=color, alpha=0.45, density=True,
-                label=f"{label} (mean={np.mean(arr):.4f})", edgecolor="white",
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        parts = ax.violinplot(
+            gap_data, positions=range(len(gap_labels)),
+            showmeans=False, showextrema=False, showmedians=False,
+        )
+        for i, body in enumerate(parts["bodies"]):
+            body.set_facecolor(gap_colors[i])
+            body.set_alpha(0.35)
+            body.set_edgecolor(gap_colors[i])
+
+        bp = ax.boxplot(
+            gap_data, positions=range(len(gap_labels)),
+            widths=0.15, patch_artist=True, showfliers=False,
+            medianprops={"color": "white", "linewidth": 1.5},
+            whiskerprops={"color": "#555", "linewidth": 0.8},
+            capprops={"color": "#555", "linewidth": 0.8},
+        )
+        for i, patch in enumerate(bp["boxes"]):
+            patch.set_facecolor(gap_colors[i])
+            patch.set_alpha(0.85)
+
+        for i, d in enumerate(gap_data):
+            mean_v = np.mean(d)
+            ax.text(
+                i, ax.get_ylim()[1] * 0.95,
+                f"μ={mean_v:.4f}\nwin={np.mean(d > 0):.0%}",
+                ha="center", va="top", fontsize=8,
+                bbox={"facecolor": "white", "alpha": 0.7, "edgecolor": "none", "pad": 2},
             )
 
-        ax.axvline(0, color="black", linestyle="-", linewidth=1, alpha=0.5)
-        ax.set_xlabel("Gap (sim_Q2Q - sim_baseline)", fontsize=12)
-        ax.set_ylabel("Density", fontsize=12)
-        ax.set_title(f"Distribution of Q2Q Advantage over Baselines ({dataset_name})", fontsize=14)
-        ax.legend(fontsize=10)
+        ax.axhline(0, color="black", linestyle="--", linewidth=0.8, alpha=0.5)
+        ax.set_xticks(range(len(gap_labels)))
+        ax.set_xticklabels(gap_labels, fontsize=11)
+        ax.set_ylabel("Similarity Gap", fontsize=12)
+        ax.set_title(f"Q2Q Advantage over Baselines ({dataset_name})", fontsize=14)
+        ax.grid(axis="y", alpha=0.2)
         plt.tight_layout()
 
         out_path = self.figs_dir / "exp1_gap_distribution.png"
@@ -514,6 +651,325 @@ class Exp1Alignment(ExperimentBase):
         return out_path
 
     # ------------------------------------------------------------------ #
+    #  Directional Alignment Analysis                                    #
+    # ------------------------------------------------------------------ #
+
+    def _compute_directional_alignment(self, loader) -> dict:
+        logger.info("Phase 7: Directional alignment analysis...")
+        method_dirs = {m: [] for m in ["q2q", "q2p", "q2n", "q2r", "q2c"]}
+        store_map = {"q2q": "fq", "q2c": "content", "q2p": "propositions", "q2n": "notes", "q2r": "reflections"}
+
+        for q in loader.queries:
+            query_emb = self.store.get_true_query_embedding(q.query_id)
+            if query_emb is None:
+                continue
+
+            for sid in q.evidence_session_ids:
+                c_embs = self.store.get_session_content(sid)
+                if c_embs is None or len(c_embs) == 0:
+                    continue
+                c_norm = c_embs / (np.linalg.norm(c_embs, axis=1, keepdims=True) + 1e-10)
+                centroid = c_norm.mean(axis=0)
+                centroid = centroid / (np.linalg.norm(centroid) + 1e-10)
+
+                embs_map = {
+                    "q2q": self.store.get_fake_query_embeddings(sid),
+                    "q2c": c_embs,
+                    "q2p": self.store.get_variant_embeddings("propositions", sid),
+                    "q2n": self.store.get_variant_embeddings("notes", sid),
+                    "q2r": self.store.get_variant_embeddings("reflections", sid),
+                }
+
+                for m, embs in embs_map.items():
+                    da = AlignmentMetrics.compute_directional_alignment(
+                        query_emb, centroid, embs,
+                    )
+                    method_dirs[m].append(da)
+
+        result = {}
+        for m in method_dirs:
+            arr = np.array(method_dirs[m]) if method_dirs[m] else np.array([0.0])
+            result[m] = {
+                "mean": round(float(np.mean(arr)), 4),
+                "std": round(float(np.std(arr)), 4),
+                "median": round(float(np.median(arr)), 4),
+            }
+        logger.info(
+            "  Directional alignment: "
+            + ", ".join(f"{m.upper()}={result[m]['mean']:.4f}" for m in method_dirs)
+        )
+        return result
+
+    # ------------------------------------------------------------------ #
+    #  Semantic Discriminability Analysis                                #
+    # ------------------------------------------------------------------ #
+
+    def _compute_discriminability(self, loader) -> dict:
+        logger.info("Phase 8: Semantic discriminability analysis...")
+        seed = self.base_config.get("experiment", {}).get("seed", 42)
+        rng = np.random.RandomState(seed)
+
+        answer_sids = set()
+        for q in loader.queries:
+            answer_sids.update(q.evidence_session_ids)
+        all_sids = list(answer_sids)
+
+        method_disc = {m: [] for m in ["q2q", "q2p", "q2n", "q2r", "q2c"]}
+
+        for q in loader.queries:
+            query_emb = self.store.get_true_query_embedding(q.query_id)
+            if query_emb is None:
+                continue
+            target_sids = set(q.evidence_session_ids)
+            neg_candidates = [s for s in all_sids if s not in target_sids]
+            if not neg_candidates:
+                continue
+            neg_sid = rng.choice(neg_candidates)
+
+            for sid in q.evidence_session_ids:
+                pos_map = {
+                    "q2q": self.store.get_fake_query_embeddings(sid),
+                    "q2c": self.store.get_session_content(sid),
+                    "q2p": self.store.get_variant_embeddings("propositions", sid),
+                    "q2n": self.store.get_variant_embeddings("notes", sid),
+                    "q2r": self.store.get_variant_embeddings("reflections", sid),
+                }
+                neg_map = {
+                    "q2q": self.store.get_fake_query_embeddings(neg_sid),
+                    "q2c": self.store.get_session_content(neg_sid),
+                    "q2p": self.store.get_variant_embeddings("propositions", neg_sid),
+                    "q2n": self.store.get_variant_embeddings("notes", neg_sid),
+                    "q2r": self.store.get_variant_embeddings("reflections", neg_sid),
+                }
+
+                for m in method_disc:
+                    if pos_map[m] is not None and neg_map[m] is not None:
+                        disc = AlignmentMetrics.compute_discriminability(
+                            query_emb, pos_map[m], neg_map[m],
+                        )
+                        method_disc[m].append(disc)
+
+        result = {}
+        for m in method_disc:
+            arr = np.array(method_disc[m]) if method_disc[m] else np.array([0.0])
+            result[m] = {
+                "mean": round(float(np.mean(arr)), 4),
+                "std": round(float(np.std(arr)), 4),
+                "positive_rate": round(float(np.mean(arr > 0)), 4),
+            }
+        logger.info(
+            "  Discriminability: "
+            + ", ".join(f"{m.upper()}={result[m]['mean']:.4f}" for m in method_disc)
+        )
+        return result
+
+    # ------------------------------------------------------------------ #
+    #  Retrieval Precision@K Analysis                                    #
+    # ------------------------------------------------------------------ #
+
+    def _compute_precision_at_k(self, loader, k_values: list[int] | None = None) -> dict:
+        if k_values is None:
+            k_values = [1, 5, 10]
+        logger.info(f"Phase 9: Precision@K analysis (K={k_values})...")
+
+        answer_sids = set()
+        for q in loader.queries:
+            answer_sids.update(q.evidence_session_ids)
+        all_sids = list(answer_sids)
+
+        pools = {m: [] for m in ["q2q", "q2p", "q2n", "q2r", "q2c"]}
+        pool_sids = {m: [] for m in pools}
+        store_getters = {
+            "q2q": self.store.get_fake_query_embeddings,
+            "q2c": self.store.get_session_content,
+            "q2p": lambda sid: self.store.get_variant_embeddings("propositions", sid),
+            "q2n": lambda sid: self.store.get_variant_embeddings("notes", sid),
+            "q2r": lambda sid: self.store.get_variant_embeddings("reflections", sid),
+        }
+
+        for sid in all_sids:
+            for m, getter in store_getters.items():
+                embs = getter(sid)
+                if embs is not None and len(embs) > 0:
+                    pools[m].append(embs)
+                    pool_sids[m].extend([sid] * len(embs))
+
+        merged_pools = {}
+        merged_sids = {}
+        for m in pools:
+            if pools[m]:
+                merged_pools[m] = np.vstack(pools[m])
+                norms = np.linalg.norm(merged_pools[m], axis=1, keepdims=True) + 1e-10
+                merged_pools[m] = merged_pools[m] / norms
+                merged_sids[m] = np.array(pool_sids[m])
+            else:
+                merged_pools[m] = None
+                merged_sids[m] = None
+
+        precision = {m: {k: [] for k in k_values} for m in pools}
+
+        for q in loader.queries:
+            query_emb = self.store.get_true_query_embedding(q.query_id)
+            if query_emb is None:
+                continue
+            q_norm = query_emb / (np.linalg.norm(query_emb) + 1e-10)
+            target_sids = set(q.evidence_session_ids)
+
+            for m in pools:
+                if merged_pools[m] is None:
+                    continue
+                sims = merged_pools[m] @ q_norm
+                top_indices = np.argsort(-sims)
+                seen_sids = set()
+                ranked_sids = []
+                for idx in top_indices:
+                    sid = merged_sids[m][idx]
+                    if sid not in seen_sids:
+                        seen_sids.add(sid)
+                        ranked_sids.append(sid)
+                    if len(ranked_sids) >= max(k_values):
+                        break
+
+                for k in k_values:
+                    top_k = ranked_sids[:k]
+                    hit = any(s in target_sids for s in top_k)
+                    precision[m][k].append(1.0 if hit else 0.0)
+
+        result = {}
+        for m in pools:
+            result[m] = {}
+            for k in k_values:
+                arr = precision[m][k]
+                result[m][f"P@{k}"] = round(float(np.mean(arr)), 4) if arr else 0.0
+        logger.info(
+            "  P@1: " + ", ".join(f"{m.upper()}={result[m].get('P@1', 0):.4f}" for m in pools)
+        )
+        return result
+
+    # ------------------------------------------------------------------ #
+    #  Deep Analysis Visualizations                                      #
+    # ------------------------------------------------------------------ #
+
+    def _plot_directional_alignment(self, dir_results: dict) -> Path:
+        logger.info("Phase 10a: Directional alignment visualization...")
+        dataset_name = self.dataset_config["dataset"]["name"]
+
+        methods = ["Q2Q", "Q2P", "Q2N", "Q2R", "Q2C"]
+        method_keys = ["q2q", "q2p", "q2n", "q2r", "q2c"]
+        means = [dir_results[m]["mean"] for m in method_keys]
+        stds = [dir_results[m]["std"] for m in method_keys]
+        colors = [METHOD_COLORS[m] for m in methods]
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        x = np.arange(len(methods))
+        bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors, alpha=0.85, edgecolor="white")
+        for bar, mean in zip(bars, means):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                f"{mean:.4f}", ha="center", va="bottom", fontsize=10,
+            )
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(methods, fontsize=12)
+        ax.set_ylabel("Directional Alignment (cosine)", fontsize=12)
+        ax.set_title(f"Intent Direction Consistency ({dataset_name})", fontsize=14)
+        ax.grid(axis="y", alpha=0.2)
+        plt.tight_layout()
+
+        out_path = self.figs_dir / "exp1_directional_alignment.png"
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"  Directional alignment saved to {out_path}")
+        return out_path
+
+    def _plot_discriminability(self, disc_results: dict) -> Path:
+        logger.info("Phase 10b: Discriminability visualization...")
+        dataset_name = self.dataset_config["dataset"]["name"]
+
+        methods = ["Q2Q", "Q2P", "Q2N", "Q2R", "Q2C"]
+        method_keys = ["q2q", "q2p", "q2n", "q2r", "q2c"]
+        colors = [METHOD_COLORS[m] for m in methods]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+        means = [disc_results[m]["mean"] for m in method_keys]
+        stds = [disc_results[m]["std"] for m in method_keys]
+        x = np.arange(len(methods))
+        bars = ax1.bar(x, means, yerr=stds, capsize=5, color=colors, alpha=0.85, edgecolor="white")
+        for bar, mean in zip(bars, means):
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                f"{mean:.4f}", ha="center", va="bottom", fontsize=9,
+            )
+        ax1.axhline(0, color="black", linestyle="--", linewidth=0.8, alpha=0.4)
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(methods, fontsize=11)
+        ax1.set_ylabel("Mean Discriminability", fontsize=12)
+        ax1.set_title("Signal − Noise Gap", fontsize=13)
+        ax1.grid(axis="y", alpha=0.2)
+
+        pos_rates = [disc_results[m]["positive_rate"] for m in method_keys]
+        bars2 = ax2.bar(x, pos_rates, color=colors, alpha=0.85, edgecolor="white")
+        for bar, rate in zip(bars2, pos_rates):
+            ax2.text(
+                bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                f"{rate:.1%}", ha="center", va="bottom", fontsize=9,
+            )
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(methods, fontsize=11)
+        ax2.set_ylabel("Positive Discrimination Rate", fontsize=12)
+        ax2.set_title("Correct Ranking Rate", fontsize=13)
+        ax2.set_ylim(0, 1.1)
+        ax2.grid(axis="y", alpha=0.2)
+
+        plt.suptitle(f"Semantic Discriminability ({dataset_name})", fontsize=14, y=1.01)
+        plt.tight_layout()
+
+        out_path = self.figs_dir / "exp1_discriminability.png"
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"  Discriminability saved to {out_path}")
+        return out_path
+
+    def _plot_precision_at_k(self, prec_results: dict) -> Path:
+        logger.info("Phase 10c: Precision@K visualization...")
+        dataset_name = self.dataset_config["dataset"]["name"]
+
+        methods = ["Q2Q", "Q2P", "Q2N", "Q2R", "Q2C"]
+        method_keys = ["q2q", "q2p", "q2n", "q2r", "q2c"]
+        colors = [METHOD_COLORS[m] for m in methods]
+        k_values = ["P@1", "P@5", "P@10"]
+
+        fig, axes = plt.subplots(1, 3, figsize=(16, 5), sharey=True)
+        x = np.arange(len(methods))
+        width = 0.6
+
+        for ki, k_label in enumerate(k_values):
+            ax = axes[ki]
+            vals = [prec_results[m].get(k_label, 0) for m in method_keys]
+            bars = ax.bar(x, vals, width, color=colors, alpha=0.85, edgecolor="white")
+            for bar, v in zip(bars, vals):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                    f"{v:.2%}", ha="center", va="bottom", fontsize=9,
+                )
+            ax.set_xticks(x)
+            ax.set_xticklabels(methods, fontsize=10)
+            ax.set_title(k_label, fontsize=13, fontweight="bold")
+            ax.set_ylim(0, 1.15)
+            ax.grid(axis="y", alpha=0.2)
+
+        axes[0].set_ylabel("Precision", fontsize=12)
+        plt.suptitle(f"Retrieval Precision@K ({dataset_name})", fontsize=14, y=1.01)
+        plt.tight_layout()
+
+        out_path = self.figs_dir / "exp1_precision_at_k.png"
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"  Precision@K saved to {out_path}")
+        return out_path
+
+    # ------------------------------------------------------------------ #
     #  Console Summary                                                   #
     # ------------------------------------------------------------------ #
 
@@ -522,6 +978,9 @@ class Exp1Alignment(ExperimentBase):
         multi = output.get("multi_method_stats", {})
         dist = output.get("distance_matrix", {})
         cluster = output.get("cluster_analysis", {})
+        dir_align = output.get("directional_alignment", {})
+        disc = output.get("discriminability", {})
+        prec = output.get("precision_at_k", {})
 
         print("\n" + "=" * 60)
         print("  Experiment 1 Results: Spatial Distribution Consistency")
@@ -549,6 +1008,35 @@ class Exp1Alignment(ExperimentBase):
             for pair, info in sorted(pairwise.items()):
                 label = pair.replace("_vs_", " vs ").upper()
                 print(f"    {label}: d={info.get('cohens_d', 0):+.4f}, p={info.get('p_value', 1):.2e}")
+            print()
+
+        if dir_align:
+            print("  --- Directional Alignment (Intent Direction Consistency) ---")
+            for method in ["q2q", "q2p", "q2n", "q2r", "q2c"]:
+                info = dir_align.get(method, {})
+                print(f"    {method.upper():>4}: mean={info.get('mean', 0):.4f} (std={info.get('std', 0):.4f})")
+            print()
+
+        if disc:
+            print("  --- Semantic Discriminability ---")
+            for method in ["q2q", "q2p", "q2n", "q2r", "q2c"]:
+                info = disc.get(method, {})
+                print(f"    {method.upper():>4}: gap={info.get('mean', 0):.4f}, "
+                      f"correct_rate={info.get('positive_rate', 0):.1%}")
+            print()
+
+        if prec:
+            print("  --- Retrieval Precision@K ---")
+            header = f"    {'':>4}"
+            for k in ["P@1", "P@5", "P@10"]:
+                header += f"  {k:>8}"
+            print(header)
+            for method in ["q2q", "q2p", "q2n", "q2r", "q2c"]:
+                info = prec.get(method, {})
+                line = f"    {method.upper():>4}"
+                for k in ["P@1", "P@5", "P@10"]:
+                    line += f"  {info.get(k, 0):>8.2%}"
+                print(line)
             print()
 
         if cluster:

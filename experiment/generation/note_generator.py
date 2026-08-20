@@ -146,11 +146,14 @@ class NoteGenerator:
             validated = []
             for item in items:
                 if isinstance(item, dict) and "title" in item and "content" in item:
+                    tags = item.get("tags", [])
+                    if not isinstance(tags, list):
+                        tags = [str(tags)] if tags else []
                     validated.append({
-                        "title": str(item.get("title", "")),
-                        "key_insight": str(item.get("key_insight", "")),
-                        "content": str(item.get("content", "")),
-                        "tags": item.get("tags", []),
+                        "title": str(item.get("title") or ""),
+                        "key_insight": str(item.get("key_insight") or ""),
+                        "content": str(item.get("content") or ""),
+                        "tags": tags,
                     })
             return validated
         return [str(item).strip() for item in items if str(item).strip()]
