@@ -2,7 +2,7 @@
   "experiment": "exp1_alignment",
   "dataset": "locomo",
   "n_queries": 1982,
-  "elapsed_seconds": 8.4,
+  "elapsed_seconds": 32.0,
   "overall": {
     "n_samples": 1982,
     "sim_q2q_mean": 0.7510777969292988,
@@ -28,19 +28,19 @@
       "median": 0.7566193342208862
     },
     "q2p": {
-      "mean": 0.0,
-      "std": 0.0,
-      "median": 0.0
+      "mean": 0.7454018461415554,
+      "std": 0.08791757354015022,
+      "median": 0.753195583820343
     },
     "q2n": {
-      "mean": 0.0,
-      "std": 0.0,
-      "median": 0.0
+      "mean": 0.7195263502726521,
+      "std": 0.09534058883968187,
+      "median": 0.7310121059417725
     },
     "q2r": {
-      "mean": 0.0,
-      "std": 0.0,
-      "median": 0.0
+      "mean": 0.6079597301878915,
+      "std": 0.0770946837391653,
+      "median": 0.6116341650485992
     },
     "q2c": {
       "mean": 0.6414273422583562,
@@ -49,28 +49,28 @@
     },
     "pairwise": {
       "q2q_vs_q2p": {
-        "t_statistic": 434.7851649494563,
-        "p_value": 0.0,
-        "cohens_d": 9.766138785893215,
-        "q2q_wins": 1982,
-        "q2p_wins": 0,
-        "q2q_win_rate": 1.0
+        "t_statistic": 3.9148728405687043,
+        "p_value": 9.351114869902737e-05,
+        "cohens_d": 0.08793582339692523,
+        "q2q_wins": 1046,
+        "q2p_wins": 935,
+        "q2q_win_rate": 0.5277497477295661
       },
       "q2q_vs_q2n": {
-        "t_statistic": 434.7851649494563,
-        "p_value": 0.0,
-        "cohens_d": 9.766138785893215,
-        "q2q_wins": 1982,
-        "q2n_wins": 0,
-        "q2q_win_rate": 1.0
+        "t_statistic": 17.255054431096752,
+        "p_value": 2.8967481638369893e-62,
+        "cohens_d": 0.38758281084391016,
+        "q2q_wins": 1392,
+        "q2n_wins": 590,
+        "q2q_win_rate": 0.7023208879919274
       },
       "q2q_vs_q2r": {
-        "t_statistic": 434.7851649494563,
+        "t_statistic": 84.65311334072803,
         "p_value": 0.0,
-        "cohens_d": 9.766138785893215,
-        "q2q_wins": 1982,
-        "q2r_wins": 0,
-        "q2q_win_rate": 1.0
+        "cohens_d": 1.9014771435823703,
+        "q2q_wins": 1954,
+        "q2r_wins": 28,
+        "q2q_win_rate": 0.9858728557013118
       },
       "q2q_vs_q2c": {
         "t_statistic": 63.99106568898055,
@@ -81,52 +81,52 @@
         "q2q_win_rate": 0.9323915237134208
       },
       "q2p_vs_q2n": {
-        "t_statistic": NaN,
-        "p_value": NaN,
-        "cohens_d": 0.0,
-        "q2p_wins": 0,
-        "q2n_wins": 0,
-        "q2p_win_rate": 0.0
+        "t_statistic": 15.109033169614175,
+        "p_value": 6.723333131111244e-49,
+        "cohens_d": 0.3393789088240902,
+        "q2p_wins": 1306,
+        "q2n_wins": 676,
+        "q2p_win_rate": 0.6589303733602422
       },
       "q2p_vs_q2r": {
-        "t_statistic": NaN,
-        "p_value": NaN,
-        "cohens_d": 0.0,
-        "q2p_wins": 0,
-        "q2r_wins": 0,
-        "q2p_win_rate": 0.0
+        "t_statistic": 79.16167881695544,
+        "p_value": 0.0,
+        "cohens_d": 1.778128611967775,
+        "q2p_wins": 1945,
+        "q2r_wins": 37,
+        "q2p_win_rate": 0.9813319878910192
       },
       "q2p_vs_q2c": {
-        "t_statistic": -445.688305718216,
+        "t_statistic": 50.249443808642496,
         "p_value": 0.0,
-        "cohens_d": -10.011044991072769,
-        "q2p_wins": 0,
-        "q2c_wins": 1982,
-        "q2p_win_rate": 0.0
+        "cohens_d": 1.1287023611110778,
+        "q2p_wins": 1744,
+        "q2c_wins": 238,
+        "q2p_win_rate": 0.8799192734611504
       },
       "q2n_vs_q2r": {
-        "t_statistic": NaN,
-        "p_value": NaN,
-        "cohens_d": 0.0,
-        "q2n_wins": 0,
-        "q2r_wins": 0,
-        "q2n_win_rate": 0.0
+        "t_statistic": 56.539491474544654,
+        "p_value": 0.0,
+        "cohens_d": 1.2699893308867816,
+        "q2n_wins": 1908,
+        "q2r_wins": 74,
+        "q2n_win_rate": 0.9626639757820383
       },
       "q2n_vs_q2c": {
-        "t_statistic": -445.688305718216,
-        "p_value": 0.0,
-        "cohens_d": -10.011044991072769,
-        "q2n_wins": 0,
-        "q2c_wins": 1982,
-        "q2n_win_rate": 0.0
+        "t_statistic": 37.0668967754134,
+        "p_value": 6.582686817927562e-229,
+        "cohens_d": 0.8325961590661214,
+        "q2n_wins": 1748,
+        "q2c_wins": 234,
+        "q2n_win_rate": 0.8819374369323916
       },
       "q2r_vs_q2c": {
-        "t_statistic": -445.688305718216,
-        "p_value": 0.0,
-        "cohens_d": -10.011044991072769,
-        "q2r_wins": 0,
-        "q2c_wins": 1982,
-        "q2r_win_rate": 0.0
+        "t_statistic": -19.389462345200627,
+        "p_value": 7.974618408014803e-77,
+        "cohens_d": -0.4355258539441973,
+        "q2r_wins": 663,
+        "q2c_wins": 1319,
+        "q2r_win_rate": 0.334510595358224
       }
     }
   },
@@ -233,38 +233,183 @@
       "std": 0.05862866661098879,
       "median": 0.41132864356040955
     },
+    "dist_TQ_P": {
+      "mean": 0.4934115606821788,
+      "std": 0.05913313425820299,
+      "median": 0.4929482638835907
+    },
+    "dist_TQ_N": {
+      "mean": 0.43992930434650096,
+      "std": 0.0559920076902897,
+      "median": 0.43982577323913574
+    },
+    "dist_TQ_R": {
+      "mean": 0.5270017607891663,
+      "std": 0.05947527936192547,
+      "median": 0.5265873372554779
+    },
     "dist_FQ_C": {
       "mean": 0.11588984725525721,
       "std": 0.026459882159036587,
       "median": 0.11060541868209839
     },
+    "dist_FQ_P": {
+      "mean": 0.12157309071664803,
+      "std": 0.014455232233377142,
+      "median": 0.1203315258026123
+    },
+    "dist_FQ_N": {
+      "mean": 0.07323823630856753,
+      "std": 0.012879608415017934,
+      "median": 0.07147455215454102
+    },
+    "dist_FQ_R": {
+      "mean": 0.19225044269625247,
+      "std": 0.02676781420640892,
+      "median": 0.19041019678115845
+    },
+    "dist_C_P": {
+      "mean": 0.1825552179464252,
+      "std": 0.017992762832793135,
+      "median": 0.18183207511901855
+    },
+    "dist_C_N": {
+      "mean": 0.12687777998505662,
+      "std": 0.021002520301001987,
+      "median": 0.12466418743133545
+    },
+    "dist_C_R": {
+      "mean": 0.25211209957265446,
+      "std": 0.025188776195632718,
+      "median": 0.24943703413009644
+    },
+    "dist_P_N": {
+      "mean": 0.12449051755633854,
+      "std": 0.011138340174129187,
+      "median": 0.12360906600952148
+    },
+    "dist_P_R": {
+      "mean": 0.10399472557107452,
+      "std": 0.020182089921631903,
+      "median": 0.10248130559921265
+    },
+    "dist_N_R": {
+      "mean": 0.16202524513405453,
+      "std": 0.01904864076912573,
+      "median": 0.15921056270599365
+    },
     "n_pairs": 2554
   },
   "cluster_analysis": {
-    "n_vectors": 3485,
-    "n_clusters": 3,
+    "n_vectors": 13382,
+    "n_clusters": 6,
     "n_tq": 200,
     "n_fq": 2861,
     "n_c": 424,
-    "n_p": 0,
-    "n_n": 0,
-    "n_r": 0,
-    "adjusted_rand_index": -0.0003,
-    "normalized_mutual_info": 0.0025,
-    "silhouette_score": 0.0495
+    "n_p": 5915,
+    "n_n": 1793,
+    "n_r": 2189,
+    "adjusted_rand_index": 0.1388,
+    "normalized_mutual_info": 0.214,
+    "silhouette_score": 0.0476
+  },
+  "directional_alignment": {
+    "q2q": {
+      "mean": 0.6052,
+      "std": 0.1167,
+      "median": 0.6042
+    },
+    "q2p": {
+      "mean": 0.6443,
+      "std": 0.1153,
+      "median": 0.6459
+    },
+    "q2n": {
+      "mean": 0.5608,
+      "std": 0.1257,
+      "median": 0.5707
+    },
+    "q2r": {
+      "mean": 0.4818,
+      "std": 0.0968,
+      "median": 0.4828
+    },
+    "q2c": {
+      "mean": 0.2198,
+      "std": 0.1271,
+      "median": 0.2126
+    }
+  },
+  "discriminability": {
+    "q2q": {
+      "mean": 0.2417,
+      "std": 0.099,
+      "positive_rate": 0.9898
+    },
+    "q2p": {
+      "mean": 0.2632,
+      "std": 0.112,
+      "positive_rate": 0.9847
+    },
+    "q2n": {
+      "mean": 0.2202,
+      "std": 0.0968,
+      "positive_rate": 0.9849
+    },
+    "q2r": {
+      "mean": 0.1776,
+      "std": 0.0878,
+      "positive_rate": 0.9765
+    },
+    "q2c": {
+      "mean": 0.1579,
+      "std": 0.0801,
+      "positive_rate": 0.9734
+    }
+  },
+  "precision_at_k": {
+    "q2q": {
+      "P@1": 0.6372,
+      "P@5": 0.8784,
+      "P@10": 0.941
+    },
+    "q2p": {
+      "P@1": 0.5732,
+      "P@5": 0.8239,
+      "P@10": 0.8971
+    },
+    "q2n": {
+      "P@1": 0.6372,
+      "P@5": 0.8587,
+      "P@10": 0.9127
+    },
+    "q2r": {
+      "P@1": 0.3663,
+      "P@5": 0.6635,
+      "P@10": 0.7987
+    },
+    "q2c": {
+      "P@1": 0.4339,
+      "P@5": 0.7457,
+      "P@10": 0.8648
+    }
   },
   "figures": {
-    "tsne": "experiment/figs/locomo/exp1_tsne.png",
+    "tsne_all": "experiment/figs/locomo/exp1_tsne_all.png",
+    "tsne_nearest": "experiment/figs/locomo/exp1_tsne_nearest.png",
     "gap_distribution": "experiment/figs/locomo/exp1_gap_distribution.png",
-    "method_comparison": "experiment/figs/locomo/exp1_method_comparison.png"
+    "method_comparison": "experiment/figs/locomo/exp1_method_comparison.png",
+    "directional_alignment": "experiment/figs/locomo/exp1_directional_alignment.png",
+    "discriminability": "experiment/figs/locomo/exp1_discriminability.png",
+    "precision_at_k": "experiment/figs/locomo/exp1_precision_at_k.png"
   },
   "sample_results": [
     {
       "query_id": "conv-26_q0",
       "sim_q2q": 0.9116,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.9066,
+      "sim_q2n": 0.8612,
+      "sim_q2r": 0.7615,
       "sim_q2c": 0.7406,
       "gap": 0.171,
       "best_fq_text": "When did Caroline first attend the LGBTQ support group, and what immediate emotional changes did she experience after hearing the transgender stories there yesterday?"
@@ -272,9 +417,9 @@
     {
       "query_id": "conv-26_q1",
       "sim_q2q": 0.8506,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.8406,
+      "sim_q2n": 0.7805,
+      "sim_q2r": 0.5868,
       "sim_q2c": 0.5561,
       "gap": 0.2945,
       "best_fq_text": "When did Melanie paint the lake sunrise artwork that she showed Caroline, and why is that particular painting especially meaningful to her?"
@@ -282,9 +427,9 @@
     {
       "query_id": "conv-26_q2",
       "sim_q2q": 0.6917,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.8125,
+      "sim_q2n": 0.7415,
+      "sim_q2r": 0.6595,
       "sim_q2c": 0.5488,
       "gap": 0.1428,
       "best_fq_text": "How have Caroline’s career plans shifted from before she attended the LGBTQ support group yesterday to her current interest in counseling and mental health roles?"
@@ -292,9 +437,9 @@
     {
       "query_id": "conv-26_q3",
       "sim_q2q": 0.6579,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.7295,
+      "sim_q2n": 0.6866,
+      "sim_q2r": 0.6001,
       "sim_q2c": 0.5533,
       "gap": 0.1046,
       "best_fq_text": "How did Caroline’s feelings of gratitude for support from friends and mentors develop over time during her adoption research, and what impact did that support have on her confidence about turning her dream into reality?"
@@ -302,9 +447,9 @@
     {
       "query_id": "conv-26_q4",
       "sim_q2q": 0.6466,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.6411,
+      "sim_q2n": 0.6546,
+      "sim_q2r": 0.6748,
       "sim_q2c": 0.5759,
       "gap": 0.0707,
       "best_fq_text": "When did Caroline first attend the LGBTQ support group, and what immediate emotional changes did she experience after hearing the transgender stories there yesterday?"
@@ -312,9 +457,9 @@
     {
       "query_id": "conv-26_q5",
       "sim_q2q": 0.8222,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.8046,
+      "sim_q2n": 0.8056,
+      "sim_q2r": 0.5654,
       "sim_q2c": 0.684,
       "gap": 0.1383,
       "best_fq_text": "When did Melanie run the charity race for mental health, and what immediate emotional impact did participating in that event last Saturday have on her outlook about caring for her mind?"
@@ -322,9 +467,9 @@
     {
       "query_id": "conv-26_q6",
       "sim_q2q": 0.8022,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.8254,
+      "sim_q2n": 0.8077,
+      "sim_q2r": 0.559,
       "sim_q2c": 0.5966,
       "gap": 0.2056,
       "best_fq_text": "When are Melanie and her family considering going camping in relation to the kids’ summer break, and what outcome does she expect this next-month camping trip to have on their family bonding and relaxation?"
@@ -332,9 +477,9 @@
     {
       "query_id": "conv-26_q7",
       "sim_q2q": 0.695,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.6562,
+      "sim_q2n": 0.6598,
+      "sim_q2r": 0.643,
       "sim_q2c": 0.6138,
       "gap": 0.0813,
       "best_fq_text": "When Caroline shared the photo from their meet‑up last week, what did that image represent about the strength of her relationships with friends she has known for four years since leaving her home country?"
@@ -342,9 +487,9 @@
     {
       "query_id": "conv-26_q8",
       "sim_q2q": 0.7542,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.796,
+      "sim_q2n": 0.7332,
+      "sim_q2r": 0.6391,
       "sim_q2c": 0.6478,
       "gap": 0.1065,
       "best_fq_text": "What specific struggles did Caroline share during her talk at the school event last week, and how did discussing those challenges impact the audience’s willingness to become better allies?"
@@ -352,9 +497,9 @@
     {
       "query_id": "conv-26_q9",
       "sim_q2q": 0.768,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.7107,
+      "sim_q2n": 0.6885,
+      "sim_q2r": 0.5972,
       "sim_q2c": 0.6687,
       "gap": 0.0994,
       "best_fq_text": "How has Caroline’s support system of friends, family, and mentors changed from when she moved from her home country four years ago to the time of her school event last week?"
@@ -362,9 +507,9 @@
     {
       "query_id": "conv-26_q10",
       "sim_q2q": 0.7476,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.6687,
+      "sim_q2n": 0.6424,
+      "sim_q2r": 0.5853,
       "sim_q2c": 0.6151,
       "gap": 0.1325,
       "best_fq_text": "How did Caroline’s move from her home country four years ago lead to her forming close friendships, and what role have those friends played in supporting her after her tough breakup?"
@@ -372,9 +517,9 @@
     {
       "query_id": "conv-26_q11",
       "sim_q2q": 0.8242,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.686,
+      "sim_q2n": 0.6207,
+      "sim_q2r": 0.5324,
       "sim_q2c": 0.5683,
       "gap": 0.256,
       "best_fq_text": "When did Caroline experience the tough breakup she mentioned, relative to her move from her home country four years ago and the formation of her current support network?"
@@ -382,9 +527,9 @@
     {
       "query_id": "conv-26_q12",
       "sim_q2q": 0.7252,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.7309,
+      "sim_q2n": 0.6714,
+      "sim_q2r": 0.5351,
       "sim_q2c": 0.565,
       "gap": 0.1602,
       "best_fq_text": "When did Caroline’s friend give her the hand‑painted bowl for her 18th birthday ten years ago, and what specific memories of art and self‑expression does that gift evoke for her now?"
@@ -392,9 +537,9 @@
     {
       "query_id": "conv-26_q13",
       "sim_q2q": 0.7883,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.8743,
+      "sim_q2n": 0.7636,
+      "sim_q2r": 0.716,
       "sim_q2c": 0.569,
       "gap": 0.2193,
       "best_fq_text": "How have Caroline’s career plans shifted from before she attended the LGBTQ support group yesterday to her current interest in counseling and mental health roles?"
@@ -402,9 +547,9 @@
     {
       "query_id": "conv-26_q14",
       "sim_q2q": 0.7264,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.7553,
+      "sim_q2n": 0.7424,
+      "sim_q2r": 0.6515,
       "sim_q2c": 0.6465,
       "gap": 0.08,
       "best_fq_text": "Why did Caroline decide, recently, to focus her future counseling career on supporting trans people’s self‑acceptance, and how did her own transition and received support lead to that choice?"
@@ -412,9 +557,9 @@
     {
       "query_id": "conv-26_q15",
       "sim_q2q": 0.6779,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.6976,
+      "sim_q2n": 0.6652,
+      "sim_q2r": 0.6471,
       "sim_q2c": 0.5898,
       "gap": 0.0881,
       "best_fq_text": "Why does Melanie describe pottery as a huge part of her life rather than just a hobby, and what has been the result of this on her emotional well-being over time?"
@@ -422,9 +567,9 @@
     {
       "query_id": "conv-26_q16",
       "sim_q2q": 0.878,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.8156,
+      "sim_q2n": 0.7263,
+      "sim_q2r": 0.6039,
       "sim_q2c": 0.6959,
       "gap": 0.1822,
       "best_fq_text": "When did Melanie sign up for her pottery class, and how did that decision affect her emotional state and sense of creative self-expression afterward?"
@@ -432,9 +577,9 @@
     {
       "query_id": "conv-26_q17",
       "sim_q2q": 0.9045,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.9342,
+      "sim_q2n": 0.866,
+      "sim_q2r": 0.7537,
       "sim_q2c": 0.6656,
       "gap": 0.2388,
       "best_fq_text": "When in this month is Caroline planning to attend the transgender conference, and what outcomes is she hoping for in terms of meeting people and learning about advocacy?"
@@ -442,9 +587,9 @@
     {
       "query_id": "conv-26_q18",
       "sim_q2q": 0.7421,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.5724,
+      "sim_q2n": 0.5596,
+      "sim_q2r": 0.543,
       "sim_q2c": 0.6657,
       "gap": 0.0764,
       "best_fq_text": "How did Melanie’s experience of camping in the forest with her family after her move differ from their earlier hiking and forest trips, and what new sense of togetherness resulted?"
@@ -452,9 +597,9 @@
     {
       "query_id": "conv-26_q19",
       "sim_q2q": 0.7035,
-      "sim_q2p": 0.0,
-      "sim_q2n": 0.0,
-      "sim_q2r": 0.0,
+      "sim_q2p": 0.7074,
+      "sim_q2n": 0.6741,
+      "sim_q2r": 0.6349,
       "sim_q2c": 0.6258,
       "gap": 0.0777,
       "best_fq_text": "When did Melanie notice that her two younger kids began to particularly love nature, and how did last week’s camping trip activities like hiking and campfires reinforce or deepen that interest?"

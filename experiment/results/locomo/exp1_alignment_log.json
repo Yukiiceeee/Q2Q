@@ -1,9 +1,9 @@
 {
   "experiment_name": "Exp1Alignment",
   "dataset_name": "locomo",
-  "start_time": "2026-08-19T07:46:41.965670+00:00",
-  "end_time": "2026-08-19T07:46:50.368388+00:00",
-  "total_elapsed_seconds": 8.403,
+  "start_time": "2026-08-20T03:21:35.407183+00:00",
+  "end_time": "2026-08-20T03:22:07.410666+00:00",
+  "total_elapsed_seconds": 32.003,
   "config": {
     "embedding": {
       "provider": "local",
@@ -24,34 +24,49 @@
   "phases": [
     {
       "name": "embeddings",
-      "elapsed_seconds": 0.013,
+      "elapsed_seconds": 0.014,
       "metadata": {}
     },
     {
       "name": "alignment",
-      "elapsed_seconds": 1.008,
+      "elapsed_seconds": 2.168,
       "metadata": {
         "n_queries": 1982
       }
     },
     {
       "name": "statistics",
-      "elapsed_seconds": 0.005,
+      "elapsed_seconds": 0.006,
       "metadata": {}
     },
     {
       "name": "distance_matrix",
-      "elapsed_seconds": 0.761,
+      "elapsed_seconds": 1.52,
       "metadata": {}
     },
     {
       "name": "cluster_analysis",
-      "elapsed_seconds": 0.698,
+      "elapsed_seconds": 2.497,
       "metadata": {}
     },
     {
       "name": "visualization",
-      "elapsed_seconds": 5.906,
+      "elapsed_seconds": 15.974,
+      "metadata": {}
+    },
+    {
+      "name": "directional_alignment",
+      "elapsed_seconds": 2.597,
+      "metadata": {}
+    },
+    {
+      "name": "discriminability",
+      "elapsed_seconds": 3.085,
+      "metadata": {}
+    },
+    {
+      "name": "precision_at_k",
+      "elapsed_seconds": 4.128,
       "metadata": {}
     }
   ],
@@ -59,7 +74,7 @@
     "experiment": "exp1_alignment",
     "dataset": "locomo",
     "n_queries": 1982,
-    "elapsed_seconds": 8.4,
+    "elapsed_seconds": 32.0,
     "overall": {
       "n_samples": 1982,
       "sim_q2q_mean": 0.7510777969292988,
