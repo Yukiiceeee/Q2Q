@@ -1,12 +1,4 @@
-"""Q2Q Agent Memory System - Entry Point
-
-Configuration loading logic:
-1. .env -> environment variables (API keys, model paths, storage paths)
-2. CLI args -> runtime parameters (alpha, top_k, storage backend, language, etc.)
-3. Defaults -> for any parameter not explicitly provided
-
-Default mode: interactive Q&A (memorize + query in a streaming loop)
-"""
+"""Q2Q Agent Memory System - Entry Point"""
 
 import argparse
 import asyncio
@@ -36,6 +28,8 @@ def apply_cli_overrides(config: Q2QConfig, args: argparse.Namespace) -> Q2QConfi
         config.retrieval.top_n = args.top_n
     if args.num_fake_queries is not None:
         config.retrieval.num_fake_queries = args.num_fake_queries
+    if args.prop_mode:
+        config.preprocessing.proposition_mode = args.prop_mode
     return config
 
 
@@ -45,8 +39,8 @@ async def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
     print("=" * 60)
     print()
     print("Commands:")
-    print("  /memorize  - Enter memorize mode (input session text, end with empty line)")
-    print("  /query     - Enter query mode (ask a question)")
+    print("  /memorize  - Enter memorize mode")
+    print("  /query     - Enter query mode")
     print("  /stats     - Show memory statistics")
     print("  /clear     - Clear all memories")
     print("  /quit      - Exit")
@@ -56,7 +50,8 @@ async def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
           f"top_n={agent.config.retrieval.top_n}, "
           f"num_fq={agent.config.retrieval.num_fake_queries}")
     print(f"Storage: {agent.config.storage.backend} | "
-          f"Embedding: {agent.config.embedding.model_name}")
+          f"Embedding: {agent.config.embedding.model_name} | "
+          f"Prop: {agent.config.preprocessing.proposition_mode}")
     print("=" * 60)
     print()
 
@@ -72,12 +67,14 @@ async def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
         if not user_input:
             continue
 
-        if user_input == "/quit" or user_input == "/exit":
+        if user_input in ("/quit", "/exit"):
             print("Bye!")
             break
 
         elif user_input == "/stats":
             stats = agent.get_stats()
+            count = await agent.memory_store.count()
+            stats["memory_count"] = count
             print(json.dumps(stats, indent=2, ensure_ascii=False))
 
         elif user_input == "/clear":
@@ -107,10 +104,11 @@ async def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
                 text = "\n".join(lines)
                 print(f"  Memorizing ({len(text)} chars)...")
                 entry = await agent.memorize(text)
-                print(f"  Done! memory_id={entry.memory_id}")
-                print(f"  Fake queries ({len(entry.fake_queries)}):")
-                for fq in entry.fake_queries:
-                    print(f"    - {fq.text}")
+                print(f"  Done! session_id={entry.session_id}")
+                print(f"  Propositions: {len(entry.propositions)}")
+                print(f"  Fake queries: {len(entry.fake_queries)}")
+                for fq in entry.fake_queries[:5]:
+                    print(f"    - {fq.text} -> {fq.answer_source}")
             else:
                 print("  Empty input, skipped.")
 
@@ -118,8 +116,6 @@ async def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
             query_text = user_input[7:].strip()
             if query_text:
                 await _run_query(agent, query_text)
-            else:
-                print("  Usage: /query <your question>")
 
         elif user_input == "/query":
             q = await loop.run_in_executor(None, lambda: input("  Query: ").strip())
@@ -140,18 +136,17 @@ async def _run_query(agent: Q2QAgent, query_text: str) -> None:
     for sq in result["sub_queries"]:
         print(f"    - {sq}")
 
-    print(f"\n  Retrieved memories ({result['num_results']}):")
-    for r in result["results"][:5]:
-        print(f"    [{r['final_score']:.4f}] q2q={r['score_q2q']:.4f} q2c={r['score_q2c']:.4f}")
-        fq_preview = r['matched_fake_queries'][0][:80] if r.get('matched_fake_queries') else ""
-        print(f"      FQ: {fq_preview}")
-        print(f"      Preview: {r['content_preview'][:80]}...")
+    print(f"\n  Matched FQs: {result['num_fqs']}")
+    for fq in result["matched_fqs"][:3]:
+        print(f"    FQ: {fq['text'][:80]}")
+
+    print(f"\n  Top Propositions: {result['num_propositions']}")
+    for p in result["top_propositions"][:5]:
+        print(f"    [{p['prop_id']}] {p['text'][:80]}")
 
     if result.get("answer"):
         print(f"\n  {'=' * 50}")
-        print(f"  Answer:\n")
-        print(f"  {result['answer']}")
-
+        print(f"  Answer:\n  {result['answer']}")
     print()
 
 
@@ -166,11 +161,11 @@ async def cmd_memorize(agent: Q2QAgent, args: argparse.Namespace) -> None:
         sys.exit(1)
 
     entry = await agent.memorize(text)
-    print(f"\nMemory created: {entry.memory_id}")
-    print(f"  Fake queries ({len(entry.fake_queries)}):")
-    for fq in entry.fake_queries:
-        print(f"    - {fq.text}")
-    print(f"  Content chunks: {len(entry.content_embeddings)}")
+    print(f"\nMemory created: {entry.session_id}")
+    print(f"  Propositions: {len(entry.propositions)}")
+    print(f"  Fake queries: {len(entry.fake_queries)}")
+    for fq in entry.fake_queries[:5]:
+        print(f"    - {fq.text} -> {fq.answer_source}")
 
 
 async def cmd_query(agent: Q2QAgent, args: argparse.Namespace) -> None:
@@ -179,23 +174,13 @@ async def cmd_query(agent: Q2QAgent, args: argparse.Namespace) -> None:
         history=args.history or "",
         return_answer=not args.no_answer,
     )
-
-    print(f"\nQuery: {result['raw_query']}")
-    print(f"Sub-queries: {result['sub_queries']}")
-    print(f"Results: {result['num_results']}")
-    for r in result["results"]:
-        print(f"\n  [{r['final_score']:.4f}] {r['memory_id']}")
-        print(f"    Q2Q: {r['score_q2q']:.4f} | Q2C: {r['score_q2c']:.4f}")
-        print(f"    Matched FQs: {r['matched_fake_queries'][:3]}")
-        print(f"    Version Chains: {r.get('version_chains', 0)}")
-        print(f"    Preview: {r['content_preview'][:100]}...")
-
-    if result.get("answer"):
-        print(f"\n--- Answer ---\n{result['answer']}")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 async def cmd_stats(agent: Q2QAgent, _args: argparse.Namespace) -> None:
     stats = agent.get_stats()
+    count = await agent.memory_store.count()
+    stats["memory_count"] = count
     print(json.dumps(stats, indent=2, ensure_ascii=False))
 
 
@@ -208,30 +193,30 @@ async def cmd_clear(agent: Q2QAgent, _args: argparse.Namespace) -> None:
 async def async_main() -> None:
     parser = argparse.ArgumentParser(description="Q2Q Agent Memory System")
 
-    parser.add_argument("--env", type=str, default=None, help="Path to .env file")
-    parser.add_argument("--log-level", type=str, default=None, help="Log level (DEBUG/INFO/WARNING)")
-    parser.add_argument("--storage", type=str, default=None, help="Storage backend (chromadb/json)")
-    parser.add_argument("--language", type=str, default=None, help="Prompt language (zh/en)")
-    parser.add_argument("--alpha", type=float, default=None, help="Q2Q weight alpha (0-1)")
-    parser.add_argument("--top-k", type=int, default=None, help="Top-K per sub-query")
-    parser.add_argument("--top-n", type=int, default=None, help="Top-N final results")
-    parser.add_argument("--num-fake-queries", type=int, default=None, help="Fake queries per memory")
+    parser.add_argument("--env", type=str, default=None)
+    parser.add_argument("--log-level", type=str, default=None)
+    parser.add_argument("--storage", type=str, default=None)
+    parser.add_argument("--language", type=str, default=None)
+    parser.add_argument("--alpha", type=float, default=None)
+    parser.add_argument("--top-k", type=int, default=None)
+    parser.add_argument("--top-n", type=int, default=None)
+    parser.add_argument("--num-fake-queries", type=int, default=None)
+    parser.add_argument("--prop-mode", type=str, default=None, choices=["llm", "nlp"])
 
-    subparsers = parser.add_subparsers(dest="command", help="Command")
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("interactive")
 
-    subparsers.add_parser("interactive", help="Interactive Q&A mode (default)")
+    p_mem = subparsers.add_parser("memorize")
+    p_mem.add_argument("--text", type=str)
+    p_mem.add_argument("--file", type=str)
 
-    p_mem = subparsers.add_parser("memorize", help="Store a session as memory")
-    p_mem.add_argument("--text", type=str, help="Session text to memorize")
-    p_mem.add_argument("--file", type=str, help="File containing session text")
+    p_query = subparsers.add_parser("query")
+    p_query.add_argument("query", type=str)
+    p_query.add_argument("--history", type=str, default="")
+    p_query.add_argument("--no-answer", action="store_true")
 
-    p_query = subparsers.add_parser("query", help="Query memories (single shot)")
-    p_query.add_argument("query", type=str, help="Query string")
-    p_query.add_argument("--history", type=str, default="", help="Conversation history")
-    p_query.add_argument("--no-answer", action="store_true", help="Skip answer generation")
-
-    subparsers.add_parser("stats", help="Show statistics")
-    subparsers.add_parser("clear", help="Clear all memories")
+    subparsers.add_parser("stats")
+    subparsers.add_parser("clear")
 
     args = parser.parse_args()
 

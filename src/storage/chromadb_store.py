@@ -1,12 +1,15 @@
+"""ChromaDB storage backend with collections for FQs, propositions, content, edges, and meta."""
 from __future__ import annotations
+
 import asyncio
 import json
 import logging
-import uuid
 from pathlib import Path
+from typing import Optional
+
 import numpy as np
 
-from src.schemas.models import MemoryEntry, FakeQuery, KnowledgePoint
+from src.schemas.models import MemoryEntry, FakeQuery, Proposition, Edge
 from src.storage.base import BaseMemoryStore
 
 logger = logging.getLogger(__name__)
@@ -30,37 +33,36 @@ class ChromaDBStore(BaseMemoryStore):
             name=f"{collection_name}_fake_queries",
             metadata={"hnsw:space": "cosine"},
         )
-
+        self._prop_collection = self._client.get_or_create_collection(
+            name=f"{collection_name}_propositions",
+            metadata={"hnsw:space": "cosine"},
+        )
         self._content_collection = self._client.get_or_create_collection(
             name=f"{collection_name}_content",
             metadata={"hnsw:space": "cosine"},
         )
-
-        self._paragraph_collection = self._client.get_or_create_collection(
-            name=f"{collection_name}_paragraphs",
-            metadata={"hnsw:space": "cosine"},
+        self._edges_collection = self._client.get_or_create_collection(
+            name=f"{collection_name}_edges",
         )
-
-        self._kp_collection = self._client.get_or_create_collection(
-            name=f"{collection_name}_knowledge_points",
-            metadata={"hnsw:space": "cosine"},
-        )
-
         self._meta_collection = self._client.get_or_create_collection(
             name=f"{collection_name}_meta",
         )
 
         logger.info(
             f"ChromaDB initialized: {persist_directory}, "
-            f"fake_queries={self._fq_collection.count()}, "
-            f"content_chunks={self._content_collection.count()}, "
-            f"paragraphs={self._paragraph_collection.count()}"
+            f"fq={self._fq_collection.count()}, "
+            f"props={self._prop_collection.count()}, "
+            f"content={self._content_collection.count()}, "
+            f"edges={self._edges_collection.count()}"
         )
 
-    # ---- sync helpers (run inside asyncio.to_thread) ----
+    # ==================== Save ====================
 
     def _save_sync(self, entry: MemoryEntry) -> None:
-        self._delete_vectors_sync(entry.memory_id)
+        self._delete_session_data_sync(entry.session_id)
+
+        def _s(v) -> str:
+            return v if isinstance(v, str) else ("" if v is None else str(v))
 
         for fq in entry.fake_queries:
             if fq.embedding is not None:
@@ -68,170 +70,132 @@ class ChromaDBStore(BaseMemoryStore):
                     ids=[fq.query_id],
                     embeddings=[fq.embedding.tolist()],
                     metadatas=[{
-                        "memory_id": entry.memory_id,
-                        "text": fq.text,
-                        "answer": "",
-                        "parent_ids": ",".join(fq.parent_ids),
-                        "depth": fq.depth,
-                        "created_at": entry.created_at,
+                        "session_id": _s(entry.session_id),
+                        "text": _s(fq.text),
+                        "answer_source": ",".join(fq.answer_source or []),
+                        "time": _s(fq.time),
+                        "parent_ids": ",".join(fq.parent_ids or []),
+                        "child_ids": ",".join(fq.child_ids or []),
+                        "depth": fq.depth or 0,
+                        "access_count": fq.access_count or 0,
+                        "created_at": _s(fq.created_at),
                     }],
-                    documents=[fq.text],
+                    documents=[_s(fq.text)],
+                )
+
+        for prop in entry.propositions:
+            if prop.embedding is not None:
+                self._prop_collection.add(
+                    ids=[f"{entry.session_id}_{prop.prop_id}"],
+                    embeddings=[prop.embedding.tolist()],
+                    metadatas=[{
+                        "session_id": _s(entry.session_id),
+                        "prop_id": _s(prop.prop_id),
+                        "text": _s(prop.text),
+                        "source": _s(prop.source),
+                        "time": _s(prop.time),
+                        "subject": _s(prop.subject),
+                        "entities": ",".join(prop.entities or []),
+                    }],
+                    documents=[_s(prop.text)],
                 )
 
         for i, emb in enumerate(entry.content_embeddings):
-            chunk_id = f"{entry.memory_id}_chunk_{i}"
+            chunk_id = f"{entry.session_id}_chunk_{i}"
             self._content_collection.add(
                 ids=[chunk_id],
                 embeddings=[emb.tolist()],
-                metadatas=[{"memory_id": entry.memory_id, "chunk_index": i}],
-                documents=[entry.session_text[:500]],
+                metadatas=[{"session_id": entry.session_id, "chunk_index": i}],
+                documents=[entry.pre_session_text[:500] if entry.pre_session_text else ""],
             )
 
-        for i, (para, emb) in enumerate(zip(entry.paragraphs, entry.paragraph_embeddings)):
-            para_id = f"{entry.memory_id}_para_{i}"
-            self._paragraph_collection.add(
-                ids=[para_id],
-                embeddings=[emb.tolist()],
-                metadatas=[{"memory_id": entry.memory_id, "paragraph_index": i}],
-                documents=[para[:500]],
-            )
-
-        for i, (kp, emb) in enumerate(zip(entry.knowledge_points, entry.kp_embeddings)):
-            kp_id = f"{entry.memory_id}_kp_{i}"
-            kp_text = f"[{kp.time}] {kp.subject}: {kp.fact} ({kp.entities_or_values})"
-            self._kp_collection.add(
-                ids=[kp_id],
-                embeddings=[emb.tolist()],
-                metadatas=[{"memory_id": entry.memory_id, "kp_index": i}],
-                documents=[kp_text[:500]],
-            )
-
-        kp_json = json.dumps(
-            [kp.to_dict() for kp in entry.knowledge_points], ensure_ascii=False
-        )
-        paragraphs_json = json.dumps(entry.paragraphs, ensure_ascii=False)
+        props_json = json.dumps([p.to_dict() for p in entry.propositions], ensure_ascii=False)
+        fqs_json = json.dumps([fq.to_dict() for fq in entry.fake_queries], ensure_ascii=False)
 
         meta_dict = {
-            "memory_id": entry.memory_id,
-            "session_text": entry.session_text,
-            "fake_query_texts": "|".join(fq.text for fq in entry.fake_queries),
-            "fake_query_ids": "|".join(fq.query_id for fq in entry.fake_queries),
-            "knowledge_points_json": kp_json,
-            "paragraphs_json": paragraphs_json,
-            "created_at": entry.created_at,
+            "session_id": _s(entry.session_id),
+            "session_text": _s(entry.session_text)[:10000],
+            "pre_session_text": _s(entry.pre_session_text)[:10000],
+            "propositions_json": props_json[:40000],
+            "fake_queries_json": fqs_json[:40000],
+            "created_at": _s(entry.created_at),
         }
         self._meta_collection.upsert(
-            ids=[entry.memory_id],
+            ids=[entry.session_id],
             metadatas=[meta_dict],
-            documents=[entry.session_text[:100]],
+            documents=[entry.session_text[:200]],
             embeddings=[[0.0]],
         )
 
         logger.info(
-            f"ChromaDB saved: {entry.memory_id} | "
-            f"{len(entry.fake_queries)} queries, {len(entry.content_embeddings)} chunks, "
-            f"{len(entry.knowledge_points)} kps, {len(entry.paragraphs)} paragraphs"
+            f"ChromaDB saved: {entry.session_id} | "
+            f"{len(entry.fake_queries)} FQs, {len(entry.propositions)} props, "
+            f"{len(entry.content_embeddings)} chunks"
         )
 
-    def _delete_vectors_sync(self, memory_id: str) -> None:
-        try:
-            fq_results = self._fq_collection.get(
-                where={"memory_id": memory_id}, include=["metadatas"]
-            )
-            if fq_results["ids"]:
-                self._fq_collection.delete(ids=fq_results["ids"])
-        except Exception:
-            pass
-
-        try:
-            content_results = self._content_collection.get(
-                where={"memory_id": memory_id}, include=["metadatas"]
-            )
-            if content_results["ids"]:
-                self._content_collection.delete(ids=content_results["ids"])
-        except Exception:
-            pass
-
-        try:
-            para_results = self._paragraph_collection.get(
-                where={"memory_id": memory_id}, include=["metadatas"]
-            )
-            if para_results["ids"]:
-                self._paragraph_collection.delete(ids=para_results["ids"])
-        except Exception:
-            pass
-
-        try:
-            kp_results = self._kp_collection.get(
-                where={"memory_id": memory_id}, include=["metadatas"]
-            )
-            if kp_results["ids"]:
-                self._kp_collection.delete(ids=kp_results["ids"])
-        except Exception:
-            pass
-
-    # ---- async public API ----
+    def _delete_session_data_sync(self, session_id: str) -> None:
+        for coll in [self._fq_collection, self._prop_collection, self._content_collection]:
+            try:
+                results = coll.get(where={"session_id": session_id}, include=["metadatas"])
+                if results["ids"]:
+                    coll.delete(ids=results["ids"])
+            except Exception:
+                pass
 
     async def save(self, entry: MemoryEntry) -> None:
         await asyncio.to_thread(self._save_sync, entry)
+
+    # ==================== Load/Get ====================
 
     async def load_all(self) -> list[MemoryEntry]:
         def _load():
             result = self._meta_collection.get(include=["metadatas"])
             entries = []
-            for i, mid in enumerate(result["ids"]):
+            for i, sid in enumerate(result["ids"]):
                 meta = result["metadatas"][i]
-                entry = self._reconstruct_entry(meta, mid)
+                entry = self._reconstruct_entry(meta)
                 entries.append(entry)
             return entries
         return await asyncio.to_thread(_load)
 
-    async def get_by_id(self, memory_id: str) -> MemoryEntry | None:
+    async def get_by_id(self, session_id: str) -> Optional[MemoryEntry]:
         def _get():
-            result = self._meta_collection.get(ids=[memory_id], include=["metadatas"])
+            result = self._meta_collection.get(ids=[session_id], include=["metadatas"])
             if not result["ids"]:
                 return None
-            meta = result["metadatas"][0]
-            return self._reconstruct_entry(meta, memory_id)
+            return self._reconstruct_entry(result["metadatas"][0])
         return await asyncio.to_thread(_get)
 
-    def _reconstruct_entry(self, meta: dict, memory_id: str) -> MemoryEntry:
+    def _reconstruct_entry(self, meta: dict) -> MemoryEntry:
         entry = MemoryEntry(
-            memory_id=meta["memory_id"],
+            session_id=meta["session_id"],
             session_text=meta.get("session_text", ""),
+            pre_session_text=meta.get("pre_session_text", ""),
             created_at=meta.get("created_at", ""),
         )
-        fq_texts = meta.get("fake_query_texts", "")
-        if fq_texts:
-            texts = fq_texts.split("|")
-            for text in texts:
-                if text.strip():
-                    entry.fake_queries.append(
-                        FakeQuery(text=text.strip(), answer="", memory_id=memory_id)
-                    )
-        kp_json = meta.get("knowledge_points_json", "")
-        if kp_json:
+        props_json = meta.get("propositions_json", "")
+        if props_json:
             try:
-                kp_list = json.loads(kp_json)
-                entry.knowledge_points = [KnowledgePoint.from_dict(kp) for kp in kp_list]
+                for p_data in json.loads(props_json):
+                    entry.propositions.append(Proposition.from_dict(p_data))
             except (json.JSONDecodeError, TypeError):
                 pass
-        para_json = meta.get("paragraphs_json", "")
-        if para_json:
+        fqs_json = meta.get("fake_queries_json", "")
+        if fqs_json:
             try:
-                entry.paragraphs = json.loads(para_json)
+                for fq_data in json.loads(fqs_json):
+                    entry.fake_queries.append(FakeQuery.from_dict(fq_data))
             except (json.JSONDecodeError, TypeError):
                 pass
         return entry
 
-    async def delete(self, memory_id: str) -> bool:
+    async def delete(self, session_id: str) -> bool:
         def _delete():
-            result = self._meta_collection.get(ids=[memory_id], include=["metadatas"])
+            result = self._meta_collection.get(ids=[session_id], include=["metadatas"])
             if not result["ids"]:
                 return False
-            self._delete_vectors_sync(memory_id)
-            self._meta_collection.delete(ids=[memory_id])
-            logger.info(f"ChromaDB deleted: {memory_id}")
+            self._delete_session_data_sync(session_id)
+            self._meta_collection.delete(ids=[session_id])
             return True
         return await asyncio.to_thread(_delete)
 
@@ -240,41 +204,25 @@ class ChromaDBStore(BaseMemoryStore):
 
     async def clear(self) -> None:
         def _clear():
-            client = self._client
-            fq_name = self._fq_collection.name
-            content_name = self._content_collection.name
-            para_name = self._paragraph_collection.name
-            kp_name = self._kp_collection.name
-            meta_name = self._meta_collection.name
-
-            client.delete_collection(fq_name)
-            client.delete_collection(content_name)
-            client.delete_collection(para_name)
-            client.delete_collection(kp_name)
-            client.delete_collection(meta_name)
-
-            self._fq_collection = client.get_or_create_collection(
-                name=fq_name, metadata={"hnsw:space": "cosine"}
-            )
-            self._content_collection = client.get_or_create_collection(
-                name=content_name, metadata={"hnsw:space": "cosine"}
-            )
-            self._paragraph_collection = client.get_or_create_collection(
-                name=para_name, metadata={"hnsw:space": "cosine"}
-            )
-            self._kp_collection = client.get_or_create_collection(
-                name=kp_name, metadata={"hnsw:space": "cosine"}
-            )
-            self._meta_collection = client.get_or_create_collection(name=meta_name)
+            for coll_attr in ["_fq_collection", "_prop_collection", "_content_collection",
+                              "_edges_collection", "_meta_collection"]:
+                coll = getattr(self, coll_attr)
+                name = coll.name
+                space = coll.metadata.get("hnsw:space") if coll.metadata else None
+                self._client.delete_collection(name)
+                if space:
+                    setattr(self, coll_attr, self._client.get_or_create_collection(
+                        name=name, metadata={"hnsw:space": space}
+                    ))
+                else:
+                    setattr(self, coll_attr, self._client.get_or_create_collection(name=name))
             logger.info("ChromaDB cleared all collections")
         await asyncio.to_thread(_clear)
 
-    # --- Vector search methods ---
+    # ==================== FQ Search ====================
 
     async def search_fake_queries(
-        self,
-        query_embedding: np.ndarray,
-        top_k: int = 10,
+        self, query_embedding: np.ndarray, top_k: int = 20
     ) -> list[dict]:
         def _search():
             count = self._fq_collection.count()
@@ -290,201 +238,66 @@ class ChromaDBStore(BaseMemoryStore):
             hits = []
             for i, qid in enumerate(results["ids"][0]):
                 distance = results["distances"][0][i]
-                score = 1.0 - distance
+                score = max(1.0 - distance, 0.0)
                 meta = results["metadatas"][0][i]
-                parent_ids_str = meta.get("parent_ids", "")
-                hits.append({
-                    "memory_id": meta["memory_id"],
-                    "score": max(score, 0.0),
-                    "text": meta.get("text", ""),
-                    "query_id": qid,
-                    "answer": "",
-                    "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
-                    "depth": meta.get("depth", 0),
-                    "created_at": meta.get("created_at", ""),
-                })
+                hits.append(self._parse_fq_hit(qid, score, meta))
             return hits
         return await asyncio.to_thread(_search)
 
-    async def search_content(
-        self,
-        query_embedding: np.ndarray,
-        top_k: int = 10,
-    ) -> list[dict]:
+    async def batch_search_fake_queries(
+        self, query_embeddings: list[np.ndarray], top_k: int = 20
+    ) -> list[list[dict]]:
         def _search():
-            count = self._content_collection.count()
+            count = self._fq_collection.count()
             if count == 0:
-                return []
-            results = self._content_collection.query(
-                query_embeddings=[query_embedding.tolist()],
-                n_results=min(top_k, count),
+                return [[] for _ in query_embeddings]
+            n = min(top_k, count)
+            emb_list = [e.tolist() for e in query_embeddings]
+            results = self._fq_collection.query(
+                query_embeddings=emb_list,
+                n_results=n,
                 include=["metadatas", "distances"],
             )
-            if not results["ids"] or not results["ids"][0]:
-                return []
-            hits = []
-            for i, cid in enumerate(results["ids"][0]):
-                distance = results["distances"][0][i]
-                score = 1.0 - distance
-                meta = results["metadatas"][0][i]
-                hits.append({
-                    "memory_id": meta["memory_id"],
-                    "score": max(score, 0.0),
-                    "chunk_index": meta.get("chunk_index", 0),
-                })
-            return hits
-        return await asyncio.to_thread(_search)
-
-    async def search_content_for_memory(
-        self,
-        query_embedding: np.ndarray,
-        memory_id: str,
-        top_k: int = 3,
-    ) -> float:
-        def _search():
-            try:
-                count = self._content_collection.count()
-                if count == 0:
-                    return 0.0
-                results = self._content_collection.query(
-                    query_embeddings=[query_embedding.tolist()],
-                    n_results=min(top_k * 10, count),
-                    where={"memory_id": memory_id},
-                    include=["distances"],
-                )
-                if not results["ids"] or not results["ids"][0]:
-                    return 0.0
-                best_score = 0.0
-                for dist in results["distances"][0]:
-                    score = max(1.0 - dist, 0.0)
-                    if score > best_score:
-                        best_score = score
-                return best_score
-            except Exception:
-                return 0.0
-        return await asyncio.to_thread(_search)
-
-    async def search_paragraphs_for_memory(
-        self,
-        query_embedding: np.ndarray,
-        memory_id: str,
-        top_k: int = 3,
-    ) -> list[dict]:
-        def _search():
-            try:
-                count = self._paragraph_collection.count()
-                if count == 0:
-                    return []
-                results = self._paragraph_collection.query(
-                    query_embeddings=[query_embedding.tolist()],
-                    n_results=min(top_k, count),
-                    where={"memory_id": memory_id},
-                    include=["distances", "documents"],
-                )
-                if not results["ids"] or not results["ids"][0]:
-                    return []
+            all_hits = []
+            for qi in range(len(query_embeddings)):
+                if not results["ids"] or qi >= len(results["ids"]) or not results["ids"][qi]:
+                    all_hits.append([])
+                    continue
                 hits = []
-                for i, pid in enumerate(results["ids"][0]):
-                    distance = results["distances"][0][i]
+                for i, qid in enumerate(results["ids"][qi]):
+                    distance = results["distances"][qi][i]
                     score = max(1.0 - distance, 0.0)
-                    text = results["documents"][0][i] if results["documents"] else ""
-                    hits.append({"score": score, "text": text})
-                hits.sort(key=lambda h: h["score"], reverse=True)
-                return hits[:top_k]
-            except Exception as e:
-                logger.warning(f"search_paragraphs_for_memory failed for {memory_id}: {e}")
-                return []
+                    meta = results["metadatas"][qi][i]
+                    hits.append(self._parse_fq_hit(qid, score, meta))
+                all_hits.append(hits)
+            return all_hits
         return await asyncio.to_thread(_search)
 
-    async def search_kps_for_memory(
-        self,
-        query_embedding: np.ndarray,
-        memory_id: str,
-        top_k: int = 10,
-    ) -> list[dict]:
-        def _search():
-            try:
-                count = self._kp_collection.count()
-                if count == 0:
-                    return []
-                results = self._kp_collection.query(
-                    query_embeddings=[query_embedding.tolist()],
-                    n_results=min(top_k * 5, count),
-                    where={"memory_id": memory_id},
-                    include=["distances", "metadatas", "documents"],
-                )
-                if not results["ids"] or not results["ids"][0]:
-                    return []
-                hits = []
-                for i, kid in enumerate(results["ids"][0]):
-                    distance = results["distances"][0][i]
-                    score = max(1.0 - distance, 0.0)
-                    meta = results["metadatas"][0][i]
-                    hits.append({
-                        "score": score,
-                        "kp_index": meta.get("kp_index", 0),
-                        "text": results["documents"][0][i] if results["documents"] else "",
-                    })
-                hits.sort(key=lambda h: h["score"], reverse=True)
-                return hits[:top_k]
-            except Exception:
-                return []
-        return await asyncio.to_thread(_search)
+    def _parse_fq_hit(self, query_id: str, score: float, meta: dict) -> dict:
+        answer_source_str = meta.get("answer_source", "")
+        parent_ids_str = meta.get("parent_ids", "")
+        child_ids_str = meta.get("child_ids", "")
+        return {
+            "query_id": query_id,
+            "session_id": meta.get("session_id", ""),
+            "text": meta.get("text", ""),
+            "score": score,
+            "answer_source": [s for s in answer_source_str.split(",") if s],
+            "parent_ids": [p for p in parent_ids_str.split(",") if p],
+            "child_ids": [c for c in child_ids_str.split(",") if c],
+            "depth": meta.get("depth", 0),
+            "time": meta.get("time", ""),
+            "created_at": meta.get("created_at", ""),
+        }
 
-    async def search_all_fake_queries(
-        self,
-        query_embedding: np.ndarray,
-        threshold: float = 0.80,
-        max_results: int = 50,
-    ) -> list[dict]:
-        def _search():
-            count = self._fq_collection.count()
-            if count == 0:
-                return []
-            results = self._fq_collection.query(
-                query_embeddings=[query_embedding.tolist()],
-                n_results=min(max_results, count),
-                include=["metadatas", "distances", "documents"],
-            )
-            if not results["ids"] or not results["ids"][0]:
-                return []
-            hits = []
-            for i, qid in enumerate(results["ids"][0]):
-                distance = results["distances"][0][i]
-                score = 1.0 - distance
-                if score >= threshold:
-                    meta = results["metadatas"][0][i]
-                    parent_ids_str = meta.get("parent_ids", "")
-                    hits.append({
-                        "query_id": qid,
-                        "memory_id": meta.get("memory_id", ""),
-                        "score": score,
-                        "text": meta.get("text", ""),
-                        "answer": "",
-                        "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
-                        "depth": meta.get("depth", 0),
-                        "created_at": meta.get("created_at", ""),
-                    })
-            return hits
-        return await asyncio.to_thread(_search)
-
-    async def get_fake_query_by_id(self, query_id: str) -> dict | None:
+    async def get_fake_query_by_id(self, query_id: str) -> Optional[dict]:
         def _get():
             try:
                 results = self._fq_collection.get(ids=[query_id], include=["metadatas"])
                 if not results["ids"]:
                     return None
                 meta = results["metadatas"][0]
-                parent_ids_str = meta.get("parent_ids", "")
-                return {
-                    "query_id": query_id,
-                    "text": meta.get("text", ""),
-                    "answer": "",
-                    "memory_id": meta.get("memory_id", ""),
-                    "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
-                    "depth": meta.get("depth", 0),
-                    "created_at": meta.get("created_at", ""),
-                }
+                return self._parse_fq_hit(query_id, 0.0, meta)
             except Exception:
                 return None
         return await asyncio.to_thread(_get)
@@ -500,93 +313,228 @@ class ChromaDBStore(BaseMemoryStore):
                 nodes = []
                 for i, qid in enumerate(results["ids"]):
                     meta = results["metadatas"][i]
-                    parent_ids_str = meta.get("parent_ids", "")
-                    nodes.append({
-                        "query_id": qid,
-                        "text": meta.get("text", ""),
-                        "answer": "",
-                        "memory_id": meta.get("memory_id", ""),
-                        "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
-                        "depth": meta.get("depth", 0),
-                        "created_at": meta.get("created_at", ""),
-                    })
+                    nodes.append(self._parse_fq_hit(qid, 0.0, meta))
                 return nodes
             except Exception:
                 return []
         return await asyncio.to_thread(_get)
 
-    # --- Batch search methods (reduce RPC round-trips) ---
+    # ==================== Proposition operations ====================
 
-    async def batch_search_fake_queries(
-        self,
-        query_embeddings: list[np.ndarray],
-        top_k: int = 20,
-    ) -> list[list[dict]]:
-        """Batch Q2Q search: pass multiple embeddings in a single ChromaDB query() call."""
-        def _search():
-            count = self._fq_collection.count()
-            if count == 0:
-                return [[] for _ in query_embeddings]
-            n = min(top_k, count)
-            emb_list = [e.tolist() for e in query_embeddings]
-            results = self._fq_collection.query(
-                query_embeddings=emb_list,
-                n_results=n,
-                include=["metadatas", "distances", "documents"],
-            )
-            all_hits = []
-            for qi in range(len(query_embeddings)):
-                if not results["ids"] or qi >= len(results["ids"]) or not results["ids"][qi]:
-                    all_hits.append([])
-                    continue
-                hits = []
-                for i, qid in enumerate(results["ids"][qi]):
-                    distance = results["distances"][qi][i]
-                    score = 1.0 - distance
-                    meta = results["metadatas"][qi][i]
-                    parent_ids_str = meta.get("parent_ids", "")
-                    hits.append({
-                        "memory_id": meta["memory_id"],
-                        "score": max(score, 0.0),
-                        "text": meta.get("text", ""),
-                        "query_id": qid,
-                        "answer": "",
-                        "parent_ids": [p for p in parent_ids_str.split(",") if p] if parent_ids_str else [],
-                        "depth": meta.get("depth", 0),
-                        "created_at": meta.get("created_at", ""),
-                    })
-                all_hits.append(hits)
-            return all_hits
-        return await asyncio.to_thread(_search)
-
-    async def batch_search_content_for_memory(
-        self,
-        query_embeddings: list[np.ndarray],
-        memory_id: str,
-        top_k: int = 3,
-    ) -> float:
-        """Batch Q2C search: pass multiple sub-query embeddings in one call, return best score."""
-        def _search():
+    async def get_propositions_by_ids(self, prop_ids: list[str], session_id: str) -> list[dict]:
+        def _get():
+            full_ids = [f"{session_id}_{pid}" for pid in prop_ids]
             try:
-                count = self._content_collection.count()
-                if count == 0:
-                    return 0.0
-                emb_list = [e.tolist() for e in query_embeddings]
-                results = self._content_collection.query(
-                    query_embeddings=emb_list,
-                    n_results=min(top_k * 10, count),
-                    where={"memory_id": memory_id},
-                    include=["distances"],
-                )
-                best_score = 0.0
-                for qi in range(len(query_embeddings)):
-                    if not results["ids"] or qi >= len(results["ids"]) or not results["ids"][qi]:
-                        continue
-                    for dist in results["distances"][qi]:
-                        score = max(1.0 - dist, 0.0)
-                        if score > best_score:
-                            best_score = score
-                return best_score
+                results = self._prop_collection.get(ids=full_ids, include=["metadatas", "documents"])
+                if not results["ids"]:
+                    return []
+                props = []
+                for i, pid in enumerate(results["ids"]):
+                    meta = results["metadatas"][i]
+                    props.append({
+                        "prop_id": meta.get("prop_id", ""),
+                        "text": meta.get("text", results["documents"][i] if results["documents"] else ""),
+                        "session_id": meta.get("session_id", ""),
+                        "source": meta.get("source", ""),
+                        "time": meta.get("time", ""),
+                        "subject": meta.get("subject", ""),
+                        "entities": meta.get("entities", "").split(",") if meta.get("entities") else [],
+                    })
+                return props
             except Exception:
-                return 0.0
+                return []
+        return await asyncio.to_thread(_get)
+
+    async def search_propositions(
+        self, query_embedding: np.ndarray, session_id: str, top_k: int = 5
+    ) -> list[dict]:
+        def _search():
+            count = self._prop_collection.count()
+            if count == 0:
+                return []
+            try:
+                results = self._prop_collection.query(
+                    query_embeddings=[query_embedding.tolist()],
+                    n_results=min(top_k * 3, count),
+                    where={"session_id": session_id},
+                    include=["metadatas", "distances", "documents"],
+                )
+                if not results["ids"] or not results["ids"][0]:
+                    return []
+                hits = []
+                for i, pid in enumerate(results["ids"][0]):
+                    distance = results["distances"][0][i]
+                    score = max(1.0 - distance, 0.0)
+                    meta = results["metadatas"][0][i]
+                    hits.append({
+                        "prop_id": meta.get("prop_id", ""),
+                        "text": meta.get("text", ""),
+                        "score": score,
+                        "session_id": meta.get("session_id", ""),
+                    })
+                return hits[:top_k]
+            except Exception:
+                return []
         return await asyncio.to_thread(_search)
+
+    # ==================== Content search ====================
+
+    async def search_content(
+        self, query_embedding: np.ndarray, top_k: int = 10
+    ) -> list[dict]:
+        def _search():
+            count = self._content_collection.count()
+            if count == 0:
+                return []
+            results = self._content_collection.query(
+                query_embeddings=[query_embedding.tolist()],
+                n_results=min(top_k, count),
+                include=["metadatas", "distances"],
+            )
+            if not results["ids"] or not results["ids"][0]:
+                return []
+            hits = []
+            for i, cid in enumerate(results["ids"][0]):
+                distance = results["distances"][0][i]
+                score = max(1.0 - distance, 0.0)
+                meta = results["metadatas"][0][i]
+                hits.append({
+                    "session_id": meta.get("session_id", ""),
+                    "score": score,
+                    "chunk_index": meta.get("chunk_index", 0),
+                })
+            return hits
+        return await asyncio.to_thread(_search)
+
+    async def batch_search_content(
+        self, query_embeddings: list[np.ndarray], top_k: int = 10
+    ) -> list[dict]:
+        def _search():
+            count = self._content_collection.count()
+            if count == 0:
+                return []
+            emb_list = [e.tolist() for e in query_embeddings]
+            results = self._content_collection.query(
+                query_embeddings=emb_list,
+                n_results=min(top_k, count),
+                include=["metadatas", "distances"],
+            )
+            session_scores: dict[str, float] = {}
+            for qi in range(len(query_embeddings)):
+                if not results["ids"] or qi >= len(results["ids"]):
+                    continue
+                for i, cid in enumerate(results["ids"][qi]):
+                    distance = results["distances"][qi][i]
+                    score = max(1.0 - distance, 0.0)
+                    sid = results["metadatas"][qi][i].get("session_id", "")
+                    if sid not in session_scores or score > session_scores[sid]:
+                        session_scores[sid] = score
+            return [{"session_id": sid, "score": sc} for sid, sc in
+                    sorted(session_scores.items(), key=lambda x: x[1], reverse=True)]
+        return await asyncio.to_thread(_search)
+
+    # ==================== Edge (DAG) operations ====================
+
+    async def save_edges(self, edges: list[Edge]) -> None:
+        def _save():
+            for edge in edges:
+                self._edges_collection.upsert(
+                    ids=[edge.edge_id],
+                    metadatas=[{
+                        "src_id": edge.src_id,
+                        "dst_id": edge.dst_id,
+                        "edge_type": edge.edge_type,
+                        "similarity": edge.similarity,
+                        "prop_overlap": edge.prop_overlap,
+                    }],
+                    documents=[f"{edge.src_id}->{edge.dst_id}"],
+                    embeddings=[[0.0]],
+                )
+        await asyncio.to_thread(_save)
+
+    async def get_edges_from(self, src_id: str) -> list[Edge]:
+        def _get():
+            try:
+                results = self._edges_collection.get(
+                    where={"src_id": src_id}, include=["metadatas"]
+                )
+                if not results["ids"]:
+                    return []
+                return [self._parse_edge(results["ids"][i], results["metadatas"][i])
+                        for i in range(len(results["ids"]))]
+            except Exception:
+                return []
+        return await asyncio.to_thread(_get)
+
+    async def get_edges_to(self, dst_id: str) -> list[Edge]:
+        def _get():
+            try:
+                results = self._edges_collection.get(
+                    where={"dst_id": dst_id}, include=["metadatas"]
+                )
+                if not results["ids"]:
+                    return []
+                return [self._parse_edge(results["ids"][i], results["metadatas"][i])
+                        for i in range(len(results["ids"]))]
+            except Exception:
+                return []
+        return await asyncio.to_thread(_get)
+
+    async def get_all_edges(self) -> list[Edge]:
+        def _get():
+            results = self._edges_collection.get(include=["metadatas"])
+            if not results["ids"]:
+                return []
+            return [self._parse_edge(results["ids"][i], results["metadatas"][i])
+                    for i in range(len(results["ids"]))]
+        return await asyncio.to_thread(_get)
+
+    async def delete_edges_involving(self, node_id: str) -> None:
+        def _delete():
+            try:
+                r1 = self._edges_collection.get(where={"src_id": node_id})
+                if r1["ids"]:
+                    self._edges_collection.delete(ids=r1["ids"])
+            except Exception:
+                pass
+            try:
+                r2 = self._edges_collection.get(where={"dst_id": node_id})
+                if r2["ids"]:
+                    self._edges_collection.delete(ids=r2["ids"])
+            except Exception:
+                pass
+        await asyncio.to_thread(_delete)
+
+    async def delete_node(self, query_id: str) -> None:
+        def _delete():
+            try:
+                self._fq_collection.delete(ids=[query_id])
+            except Exception:
+                pass
+        await asyncio.to_thread(_delete)
+        await self.delete_edges_involving(query_id)
+
+    def _parse_edge(self, edge_id: str, meta: dict) -> Edge:
+        return Edge(
+            edge_id=edge_id,
+            src_id=meta.get("src_id", ""),
+            dst_id=meta.get("dst_id", ""),
+            edge_type=meta.get("edge_type", "EVOLVES_TO"),
+            similarity=meta.get("similarity", 0.0),
+            prop_overlap=meta.get("prop_overlap", 0.0),
+        )
+
+    # ==================== FQ metadata update ====================
+
+    async def update_fq_metadata(self, query_id: str, updates: dict) -> None:
+        def _update():
+            try:
+                existing = self._fq_collection.get(ids=[query_id], include=["metadatas", "embeddings"])
+                if not existing["ids"]:
+                    return
+                meta = existing["metadatas"][0]
+                meta.update(updates)
+                self._fq_collection.update(ids=[query_id], metadatas=[meta])
+            except Exception as e:
+                logger.warning(f"Failed to update FQ metadata {query_id}: {e}")
+        await asyncio.to_thread(_update)

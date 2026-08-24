@@ -50,8 +50,6 @@ class QueryDecomposer:
             ))
 
         logger.info(f"QueryDecomposer: {len(sub_queries)} sub-queries")
-        for sq in sub_queries:
-            logger.debug(f"  SubQuery[{sq.index}]: {sq.text} | keywords: {sq.keywords}")
         return sub_queries
 
     def _parse_sub_queries(self, content: str) -> list[dict]:

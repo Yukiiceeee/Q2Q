@@ -14,17 +14,8 @@ from src.prompts.query_format import (
     get_query_format_spec,
 )
 from src.prompts.answer_gen import (
-    ANSWER_GEN_PROMPT_EN,
-    ANSWER_GEN_PROMPT_ZH,
-    build_answer_gen_prompt,
-)
-from src.prompts.knowledge_extraction import (
-    KNOWLEDGE_EXTRACTION_PROMPT_EN,
-    KNOWLEDGE_EXTRACTION_PROMPT_ZH,
-    KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_EN,
-    KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_ZH,
-    build_knowledge_extraction_prompt,
-    build_knowledge_extraction_with_context_prompt,
+    build_answer_gen_prompt_stage1,
+    build_answer_gen_prompt_stage2,
 )
 
 __all__ = [
@@ -37,13 +28,6 @@ __all__ = [
     "QUERY_FORMAT_SPEC_EN",
     "QUERY_FORMAT_SPEC_ZH",
     "get_query_format_spec",
-    "ANSWER_GEN_PROMPT_EN",
-    "ANSWER_GEN_PROMPT_ZH",
-    "build_answer_gen_prompt",
-    "KNOWLEDGE_EXTRACTION_PROMPT_EN",
-    "KNOWLEDGE_EXTRACTION_PROMPT_ZH",
-    "KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_EN",
-    "KNOWLEDGE_EXTRACTION_WITH_CONTEXT_PROMPT_ZH",
-    "build_knowledge_extraction_prompt",
-    "build_knowledge_extraction_with_context_prompt",
+    "build_answer_gen_prompt_stage1",
+    "build_answer_gen_prompt_stage2",
 ]

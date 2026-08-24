@@ -1,21 +1,21 @@
+"""Q2Q Agent - top-level orchestrator for memorize/query operations."""
 from __future__ import annotations
+
 import asyncio
 import logging
-import json
-from pathlib import Path
-from datetime import datetime
 
 from src.config import Q2QConfig
-from src.schemas.models import MemoryEntry, RetrievalResult
+from src.schemas.models import MemoryEntry, RetrievalResult, RetrievalResponse
 from src.utils.llm_client import create_llm_client, BaseLLMClient, get_usage_tracker
 from src.embedding.factory import create_embedding_provider
 from src.embedding.base import BaseEmbeddingProvider
 from src.storage.base import BaseMemoryStore
-from src.storage.json_store import JsonMemoryStore
 from src.storage.chromadb_store import ChromaDBStore
+from src.preprocessing.compressor import PerplexityCompressor
+from src.preprocessing.proposition_extractor import PropositionExtractor
 from src.memory.query_generator import FakeQueryGenerator
 from src.memory.constructor import MemoryConstructor
-from src.memory.version_detector import VersionDetector
+from src.memory.graph_manager import MemoryGraphManager
 from src.retrieval.query_decomposer import QueryDecomposer
 from src.retrieval.dual_retriever import DualRetriever
 from src.retrieval.answerer import Answerer
@@ -28,6 +28,7 @@ class Q2QAgent:
     def __init__(self, config: Q2QConfig):
         self.config = config
 
+        # --- Infrastructure ---
         self.llm_client: BaseLLMClient = create_llm_client(
             provider=config.llm.provider,
             model=config.llm.model,
@@ -45,45 +46,76 @@ class Q2QAgent:
 
         self.memory_store: BaseMemoryStore = self._create_store(config)
 
-        self.version_detector = VersionDetector(
-            memory_store=self.memory_store,
-            embedding_provider=self.embedding_provider,
-            threshold=config.retrieval.version_threshold,
+        # --- Phase 1: Preprocessing ---
+        self.compressor = PerplexityCompressor(
+            model_path=config.preprocessing.compressor_model,
+            device=config.preprocessing.compressor_device,
+            threshold=config.preprocessing.perplexity_threshold,
         )
 
-        self.query_generator = FakeQueryGenerator(
+        self.prop_extractor = PropositionExtractor(
+            mode=config.preprocessing.proposition_mode,
             llm_client=self.llm_client,
+            nlp_inference_model_path=config.preprocessing.nlp_inference_model,
+            language=config.language,
+            device=config.preprocessing.compressor_device,
+        )
+
+        # --- Phase 2: Memory Construction ---
+        self.fq_generator = FakeQueryGenerator(
+            llm_client=self.llm_client,
+            embedding_provider=self.embedding_provider,
             num_queries=config.retrieval.num_fake_queries,
             language=config.language,
-        )
-        self.memory_constructor = MemoryConstructor(
-            query_generator=self.query_generator,
-            embedding_provider=self.embedding_provider,
-            memory_store=self.memory_store,
-            version_detector=self.version_detector,
+            binding_verify_threshold=config.retrieval.binding_verify_threshold,
         )
 
+        self.memory_constructor = MemoryConstructor(
+            compressor=self.compressor,
+            prop_extractor=self.prop_extractor,
+            query_generator=self.fq_generator,
+            embedding_provider=self.embedding_provider,
+            memory_store=self.memory_store,
+        )
+
+        # --- Phase 3: Graph Management ---
+        self.graph_manager = MemoryGraphManager(
+            store=self.memory_store,
+            embedding_provider=self.embedding_provider,
+            evolve_threshold=config.graph.evolve_threshold,
+            diverge_low=config.graph.diverge_low,
+            diverge_high=config.graph.diverge_high,
+            max_parents=config.graph.max_parents,
+            similarity_top_k=config.graph.similarity_top_k,
+            maintenance_interval=config.graph.maintenance_interval,
+            merge_overlap_threshold=config.graph.merge_overlap_threshold,
+            max_chain_length=config.graph.max_chain_length,
+            chain_sample_interval=config.graph.chain_sample_interval,
+        )
+
+        # --- Phase 4: Retrieval & Answer ---
         self.query_decomposer = QueryDecomposer(
             llm_client=self.llm_client,
             embedding_provider=self.embedding_provider,
             language=config.language,
         )
+
         self.dual_retriever = DualRetriever(
             embedding_provider=self.embedding_provider,
             memory_store=self.memory_store,
+            graph_manager=self.graph_manager,
             alpha=config.retrieval.alpha,
             top_k_per_sub=config.retrieval.top_k_per_sub,
             top_n=config.retrieval.top_n,
             top_k_q2c=config.retrieval.top_k_q2c,
-            version_chain_depth=config.retrieval.version_chain_depth,
-            fq_confidence_threshold=config.retrieval.fq_confidence_threshold,
-            paragraph_top_k=config.retrieval.paragraph_top_k,
+            chain_depth=config.retrieval.chain_depth,
+            prop_top_k_per_fq=config.retrieval.prop_top_k_per_fq,
         )
+
         self.answerer = Answerer(
             llm_client=self.llm_client,
             language=config.language,
             max_context_tokens=config.retrieval.max_context_tokens,
-            fq_confidence_threshold=config.retrieval.fq_confidence_threshold,
         )
 
         self.usage_tracker = get_usage_tracker()
@@ -91,8 +123,9 @@ class Q2QAgent:
         logger.info(
             f"Q2QAgent initialized | model={config.llm.model} | "
             f"embedding={config.embedding.model_name} | "
-            f"storage={config.storage.backend} | lang={config.language} | "
-            f"version_threshold={config.retrieval.version_threshold}"
+            f"storage={config.storage.backend} | "
+            f"prop_mode={config.preprocessing.proposition_mode} | "
+            f"lang={config.language}"
         )
 
     def _create_store(self, config: Q2QConfig) -> BaseMemoryStore:
@@ -101,26 +134,26 @@ class Q2QAgent:
                 persist_directory=config.storage.chromadb_path,
                 collection_name=config.storage.chromadb_collection,
             )
-        elif config.storage.backend == "json":
-            return JsonMemoryStore(storage_path=config.storage.json_path)
         raise ValueError(f"Unsupported storage backend: {config.storage.backend}")
 
     async def memorize(self, session_text: str, metadata: dict | None = None) -> MemoryEntry:
         self.usage_tracker.set_phase("memorize")
         logger.info(f"--- Memorize Start ({len(session_text)} chars) ---")
 
+        # Phase 1-2: Build memory (preprocessing + FQ generation + embedding)
         entry = await self.memory_constructor.build_memory(session_text, metadata)
 
-        logger.info(f"  Memory ID: {entry.memory_id}")
-        logger.info(f"  Fake Queries ({len(entry.fake_queries)}):")
-        for i, fq in enumerate(entry.fake_queries):
-            dag_info = f" [parents={len(fq.parent_ids)}, d{fq.depth}]" if fq.parent_ids else ""
-            logger.info(f"    [{i}] {fq.text}{dag_info}")
-        logger.info(f"  Knowledge Points: {len(entry.knowledge_points)}")
-        logger.info(f"  Paragraphs: {len(entry.paragraphs)}")
-        logger.info(f"  Content Chunks: {len(entry.content_embeddings)}")
-        logger.info(f"--- Memorize Complete ---")
+        # Phase 3: Integrate into graph
+        if entry.fake_queries:
+            edges = await self.graph_manager.integrate_new_fqs(entry.fake_queries)
+            logger.info(f"  Graph integration: {len(edges)} new edges")
 
+        logger.info(
+            f"  Memory {entry.session_id} complete: "
+            f"{len(entry.fake_queries)} FQs, "
+            f"{len(entry.propositions)} props"
+        )
+        logger.info(f"--- Memorize Complete ---")
         return entry
 
     async def query(
@@ -130,48 +163,43 @@ class Q2QAgent:
         return_answer: bool = True,
     ) -> dict:
         self.usage_tracker.set_phase("query")
-        logger.info(f"--- Query Start ---")
-        logger.info(f"  Raw Query: {raw_query}")
+        logger.info(f"--- Query Start: {raw_query} ---")
 
+        # Decompose query
         sub_queries = await self.query_decomposer.decompose(raw_query, history)
         logger.info(f"  Sub-queries ({len(sub_queries)}):")
         for sq in sub_queries:
             logger.info(f"    [{sq.index}] {sq.text}")
 
-        results = await self.dual_retriever.retrieve(sub_queries)
-        logger.info(f"  Retrieval Results: {len(results)}")
-        for i, r in enumerate(results):
-            matched_fqs_preview = r.matched_fake_queries[0][:60] if r.matched_fake_queries else ""
-            chain_count = len(r.version_chain_context)
-            logger.info(
-                f"    [{i}] score={r.final_score:.4f} "
-                f"(q2q={r.score_q2q:.4f}, q2c={r.score_q2c:.4f}) "
-                f"memory={r.memory.memory_id[:12]}... "
-                f"chains={chain_count} "
-                f"matched_fq=\"{matched_fqs_preview}\""
-            )
+        # Dual retrieval
+        retrieval_result = await self.dual_retriever.retrieve(sub_queries)
+        logger.info(
+            f"  Retrieval: {len(retrieval_result.matched_fqs)} direct FQs, "
+            f"{len(retrieval_result.ranked_propositions)} props, "
+            f"{len(retrieval_result.session_texts)} sessions"
+        )
 
+        # Answer generation
         answer = ""
-        if return_answer and results:
-            answer = await self.answerer.answer(raw_query, results, history, sub_queries)
+        if return_answer and (retrieval_result.ranked_propositions or retrieval_result.session_texts):
+            answer = await self.answerer.answer(
+                raw_query, retrieval_result, history, sub_queries
+            )
             logger.info(f"  Answer generated ({len(answer)} chars)")
 
         response = {
             "raw_query": raw_query,
             "sub_queries": [sq.text for sq in sub_queries],
-            "num_results": len(results),
-            "results": [
-                {
-                    "memory_id": r.memory.memory_id,
-                    "score_q2q": round(r.score_q2q, 4),
-                    "score_q2c": round(r.score_q2c, 4),
-                    "final_score": round(r.final_score, 4),
-                    "matched_fake_queries": r.matched_fake_queries,
-                    "matched_sub_queries": r.matched_sub_queries,
-                    "content_preview": r.memory.session_text[:200],
-                    "version_chains": len(r.version_chain_context),
-                }
-                for r in results
+            "num_fqs": len(retrieval_result.matched_fqs),
+            "num_propositions": len(retrieval_result.ranked_propositions),
+            "num_sessions": len(retrieval_result.session_texts),
+            "matched_fqs": [
+                {"query_id": fq.query_id, "text": fq.text, "session_id": fq.session_id}
+                for fq in retrieval_result.matched_fqs[:5]
+            ],
+            "top_propositions": [
+                {"prop_id": p.prop_id, "text": p.text, "session_id": p.session_id}
+                for p in retrieval_result.ranked_propositions[:10]
             ],
             "answer": answer,
         }
@@ -182,7 +210,7 @@ class Q2QAgent:
     async def batch_memorize(
         self,
         sessions: list[str],
-        max_concurrent: int = 5,
+        max_concurrent: int = 3,
     ) -> list[MemoryEntry]:
         semaphore = asyncio.Semaphore(max_concurrent)
 

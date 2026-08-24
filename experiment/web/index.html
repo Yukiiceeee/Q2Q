@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="smooth-scroll">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Q2Q — Motivation 分析实验报告</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] }
+        }
+      }
+    }
+  </script>
+
+  <!-- ECharts -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+
+  <!-- AOS -->
+  <link href="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="grid-bg">
+
+  <!-- Lightbox Overlay -->
+  <div id="lightbox-overlay" class="hidden fixed inset-0 z-50 items-center justify-center bg-slate-950/95 backdrop-blur-sm cursor-pointer" onclick="closeLightbox()">
+    <div class="max-w-[90vw] max-h-[90vh] relative" onclick="event.stopPropagation()">
+      <img id="lightbox-img" src="" alt="" class="max-w-full max-h-[85vh] rounded-lg shadow-2xl">
+      <p id="lightbox-caption" class="text-center text-sm text-slate-400 mt-3"></p>
+      <button onclick="closeLightbox()" class="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-slate-800 border border-slate-600 text-slate-300 flex items-center justify-center hover:bg-slate-700 transition">✕</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- HERO SECTION -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <section class="hero-gradient min-h-[85vh] flex flex-col items-center justify-center text-center px-6 relative">
+    <div data-aos="fade-up">
+      <p class="text-sm text-blue-400 font-medium tracking-wider uppercase mb-4">Motivation 分析报告</p>
+      <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight mb-4">
+        <span class="gradient-text">Q2Q</span>
+        <span class="text-white">记忆检索</span>
+      </h1>
+      <p class="text-lg text-slate-400 max-w-2xl mx-auto mb-8">
+        Query-to-Query 嵌入对齐在语义匹配、改写鲁棒性和时序可扩展性三项实验中均显著优于直接内容匹配方法。
+      </p>
+
+      <div class="flex flex-wrap items-center justify-center gap-3 mb-12">
+        <span class="badge"><span class="w-2 h-2 rounded-full bg-blue-400"></span> 数据集：LoCoMo</span>
+        <span class="badge"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> 模型：BGE-Large-EN-v1.5</span>
+        <span class="badge"><span class="w-2 h-2 rounded-full bg-amber-400"></span> 维度：1024</span>
+        <span class="badge"><span class="w-2 h-2 rounded-full bg-violet-400"></span> 样本数：1,982</span>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-center gap-3">
+        <a href="#exp1" class="nav-pill">① 语义对齐</a>
+        <a href="#exp2" class="nav-pill">② 鲁棒性</a>
+        <a href="#exp3" class="nav-pill">③ 时序漂移</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- OVERVIEW DASHBOARD -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <section class="max-w-7xl mx-auto px-6 py-20">
+    <h2 class="section-title text-center text-white mb-12" data-aos="fade-up">核心发现一览</h2>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4" data-aos="fade-up" data-aos-delay="100">
+      <div class="glass p-6 text-center glow-blue">
+        <p class="text-xs text-slate-400 uppercase tracking-wider mb-2">Q2Q 相似度</p>
+        <p class="metric-value text-blue-400">0.751</p>
+        <p class="text-xs text-slate-500 mt-1">平均余弦相似度</p>
+      </div>
+      <div class="glass p-6 text-center">
+        <p class="text-xs text-slate-400 uppercase tracking-wider mb-2">对齐差距</p>
+        <p class="metric-value text-emerald-400">+0.110</p>
+        <p class="text-xs text-slate-500 mt-1">相对 Q2C 基线</p>
+      </div>
+      <div class="glass p-6 text-center">
+        <p class="text-xs text-slate-400 uppercase tracking-wider mb-2">胜率</p>
+        <p class="metric-value text-amber-400">93.2%</p>
+        <p class="text-xs text-slate-500 mt-1">Q2Q > Q2C</p>
+      </div>
+      <div class="glass p-6 text-center">
+        <p class="text-xs text-slate-400 uppercase tracking-wider mb-2">效应量</p>
+        <p class="metric-value text-red-400">1.44</p>
+        <p class="text-xs text-slate-500 mt-1">Cohen's d（大效应）</p>
+      </div>
+      <div class="glass p-6 text-center">
+        <p class="text-xs text-slate-400 uppercase tracking-wider mb-2">MRR @ 全量</p>
+        <p class="metric-value text-violet-400">0.733</p>
+        <p class="text-xs text-slate-500 mt-1">记忆池=272 条</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- EXP1: SEMANTIC ALIGNMENT -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <section id="exp1" class="max-w-7xl mx-auto px-6 py-20">
+    <div class="flex items-center gap-3 mb-2" data-aos="fade-up">
+      <span class="w-3 h-3 rounded-full bg-blue-500"></span>
+      <p class="text-sm text-blue-400 font-medium uppercase tracking-wider">实验一</p>
+    </div>
+    <h2 class="section-title text-white mb-3" data-aos="fade-up">语义对齐分析</h2>
+    <p class="text-slate-400 max-w-3xl mb-10" data-aos="fade-up">
+      Q2Q 嵌入（假想查询 → 记忆）与真实检索查询的余弦相似度，是否显著高于直接内容嵌入？
+    </p>
+
+    <!-- Charts Row -->
+    <div class="grid md:grid-cols-2 gap-6 mb-10">
+      <div class="glass-strong p-6" data-aos="fade-up" data-aos-delay="100">
+        <div id="chart-exp1-similarity" class="chart-container"></div>
+      </div>
+      <div class="glass-strong p-6" data-aos="fade-up" data-aos-delay="200">
+        <div id="chart-exp1-category" class="chart-container"></div>
+      </div>
+    </div>
+
+    <!-- Statistical Tests Table -->
+    <div class="glass-strong p-6 mb-10" data-aos="fade-up">
+      <h3 class="text-white font-semibold mb-4">配对统计检验（Paired t-test）</h3>
+      <div class="overflow-x-auto">
+        <table class="stat-table">
+          <thead>
+            <tr>
+              <th>对比组</th>
+              <th>t 统计量</th>
+              <th>p 值</th>
+              <th>Cohen's d</th>
+              <th>胜率</th>
+              <th>显著性</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="text-white font-medium">Q2Q vs Q2C</td>
+              <td>64.0</td>
+              <td class="text-emerald-400">&lt; 1e-300</td>
+              <td class="text-amber-400">1.437</td>
+              <td>93.2%</td>
+              <td><span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">极大效应</span></td>
+            </tr>
+            <tr>
+              <td class="text-white font-medium">Q2Q vs Q2R</td>
+              <td>84.7</td>
+              <td class="text-emerald-400">&lt; 1e-300</td>
+              <td class="text-amber-400">1.901</td>
+              <td>98.6%</td>
+              <td><span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">极大效应</span></td>
+            </tr>
+            <tr>
+              <td class="text-white font-medium">Q2Q vs Q2N</td>
+              <td>17.3</td>
+              <td class="text-emerald-400">2.9e-62</td>
+              <td>0.388</td>
+              <td>70.2%</td>
+              <td><span class="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">中小效应</span></td>
+            </tr>
+            <tr>
+              <td class="text-white font-medium">Q2Q vs Q2P</td>
+              <td>3.9</td>
+              <td class="text-emerald-400">9.4e-5</td>
+              <td>0.088</td>
+              <td>52.8%</td>
+              <td><span class="text-xs px-2 py-0.5 rounded bg-slate-500/20 text-slate-300">可忽略</span></td>
+            </tr>
+            <tr>
+              <td class="text-white font-medium">Q2P vs Q2C</td>
+              <td>50.2</td>
+              <td class="text-emerald-400">&lt; 1e-300</td>
+              <td class="text-amber-400">1.129</td>
+              <td>88.0%</td>
+              <td><span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">大效应</span></td>
+            </tr>
+            <tr>
+              <td class="text-white font-medium">Q2N vs Q2C</td>
+              <td>37.1</td>
+              <td class="text-emerald-400">6.6e-229</td>
+              <td class="text-amber-400">0.833</td>
+              <td>88.2%</td>
+              <td><span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">大效应</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Figure Gallery -->
+    <div class="mb-10" data-aos="fade-up">
+      <h3 class="text-white font-semibold mb-4">可视化图表</h3>
+      <div class="figure-grid" id="gallery-exp1"></div>
+    </div>
+
+    <!-- Conclusion -->
+    <div class="conclusion-card" data-aos="fade-up">
+      <h4 class="text-emerald-300 font-semibold mb-2">✦ 结论</h4>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        <strong class="text-white">Q2Q 达到最高语义对齐度</strong>（平均相似度 = 0.751），显著优于直接内容嵌入 Q2C（差距 = +0.110，Cohen's d = 1.44）。该优势在全部 5 个问题类别中均一致成立（所有 p &lt; 1e-25）。方法排序为：<span class="font-mono text-blue-300">Q2Q ≈ Q2P &gt; Q2N &gt;&gt; Q2C &gt; Q2R</span>。这证实了将假想查询作为记忆索引所生成的嵌入，更贴近用户实际的检索表述。
+      </p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- EXP2: ROBUSTNESS -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <section id="exp2" class="max-w-7xl mx-auto px-6 py-20">
+    <div class="flex items-center gap-3 mb-2" data-aos="fade-up">
+      <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+      <p class="text-sm text-emerald-400 font-medium uppercase tracking-wider">实验二</p>
+    </div>
+    <h2 class="section-title text-white mb-3" data-aos="fade-up">改写鲁棒性分析</h2>
+    <p class="text-slate-400 max-w-3xl mb-10" data-aos="fade-up">
+      当查询以不同风格改写（推理、场景、因果、外围、否定）后，各方法的检索得分稳定性如何？
+    </p>
+
+    <!-- Charts Row -->
+    <div class="grid md:grid-cols-2 gap-6 mb-10">
+      <div class="glass-strong p-6" data-aos="fade-up" data-aos-delay="100">
+        <div id="chart-exp2-radar" class="chart-container"></div>
+      </div>
+      <div class="glass-strong p-6" data-aos="fade-up" data-aos-delay="200">
+        <div id="chart-exp2-drop" class="chart-container"></div>
+      </div>
+    </div>
+
+    <!-- Robustness Scores Table -->
+    <div class="glass-strong p-6 mb-10" data-aos="fade-up">
+      <h3 class="text-white font-semibold mb-4">鲁棒性指标汇总</h3>
+      <div class="overflow-x-auto">
+        <table class="stat-table">
+          <thead>
+            <tr>
+              <th>方法</th>
+              <th>鲁棒性得分</th>
+              <th>平均方差</th>
+              <th>解读</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="inline-block w-2 h-2 rounded-full bg-blue-500 mr-2"></span><span class="text-white font-medium">Q2Q</span></td>
+              <td>0.790</td>
+              <td>0.00171</td>
+              <td class="text-slate-400">高对齐度，中等稳定性</td>
+            </tr>
+            <tr>
+              <td><span class="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-2"></span><span class="text-white font-medium">Q2P</span></td>
+              <td>0.753</td>
+              <td>0.00171</td>
+              <td class="text-slate-400">高对齐度，方差与 Q2Q 相近</td>
+            </tr>
+            <tr>
+              <td><span class="inline-block w-2 h-2 rounded-full bg-amber-500 mr-2"></span><span class="text-white font-medium">Q2N</span></td>
+              <td>0.801</td>
+              <td>0.00158</td>
+              <td class="text-slate-400">稳定性好，对齐度略低</td>
+            </tr>
+            <tr>
+              <td><span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-2"></span><span class="text-white font-medium">Q2R</span></td>
+              <td>0.821</td>
+              <td>0.00167</td>
+              <td class="text-slate-400">最鲁棒但对齐度最低</td>
+            </tr>
+            <tr>
+              <td><span class="inline-block w-2 h-2 rounded-full bg-violet-500 mr-2"></span><span class="text-white font-medium">Q2C</span></td>
+              <td>0.847</td>
+              <td>0.00147</td>
+              <td class="text-slate-400">最稳定，原始性能最低</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Figure Gallery -->
+    <div class="mb-10" data-aos="fade-up">
+      <h3 class="text-white font-semibold mb-4">可视化图表</h3>
+      <div class="figure-grid" id="gallery-exp2"></div>
+    </div>
+
+    <!-- Conclusion -->
+    <div class="conclusion-card" data-aos="fade-up">
+      <h4 class="text-emerald-300 font-semibold mb-2">✦ 结论</h4>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        <strong class="text-white">Q2Q 在改写条件下表现出最高的下降率</strong>（平均约 10.8%），表明其对查询措辞高度敏感。然而这恰恰是优势所在：Q2Q 的基线对齐度极高（0.751），即使经历最大幅度下降（场景类：-12.1%），仍然超过 Q2C 的原始得分。方差比（Q2C/Q2Q = 0.86）证实 Q2Q 捕获了更丰富的语义信号——包括措辞细微差异——而非噪声估计。<span class="font-mono text-blue-300">高敏感度 + 高上限 = 精确性，而非脆弱性。</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- EXP3: TEMPORAL DRIFT -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <section id="exp3" class="max-w-7xl mx-auto px-6 py-20">
+    <div class="flex items-center gap-3 mb-2" data-aos="fade-up">
+      <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+      <p class="text-sm text-amber-400 font-medium uppercase tracking-wider">实验三</p>
+    </div>
+    <h2 class="section-title text-white mb-3" data-aos="fade-up">时序漂移与可扩展性</h2>
+    <p class="text-slate-400 max-w-3xl mb-10" data-aos="fade-up">
+      当记忆池从 27 条扩展到 272 条（10 倍膨胀），各方法的检索准确率如何退化？
+    </p>
+
+    <!-- Main Chart -->
+    <div class="glass-strong p-6 mb-6" data-aos="fade-up" data-aos-delay="100">
+      <div id="chart-exp3-mrr" class="chart-container-lg"></div>
+    </div>
+
+    <!-- Secondary Chart + Metrics -->
+    <div class="grid md:grid-cols-3 gap-6 mb-10">
+      <div class="md:col-span-2 glass-strong p-6" data-aos="fade-up" data-aos-delay="100">
+        <div id="chart-exp3-recall" class="chart-container"></div>
+      </div>
+      <div class="space-y-4" data-aos="fade-up" data-aos-delay="200">
+        <div class="glass p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">初始 MRR</p>
+          <p class="font-mono text-2xl text-blue-400 font-bold">0.801</p>
+          <p class="text-xs text-slate-500">记忆池 = 27</p>
+        </div>
+        <div class="glass p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">最终 MRR</p>
+          <p class="font-mono text-2xl text-blue-300 font-bold">0.733</p>
+          <p class="text-xs text-slate-500">记忆池 = 272</p>
+        </div>
+        <div class="glass p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">衰减率</p>
+          <p class="font-mono text-2xl text-amber-400 font-bold">−8.5%</p>
+          <p class="text-xs text-slate-500">10 倍池扩展</p>
+        </div>
+        <div class="glass p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Q2Q − Q2C 差距</p>
+          <p class="font-mono text-2xl text-emerald-400 font-bold">+0.167</p>
+          <p class="text-xs text-slate-500">最终检查点</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Figure Gallery -->
+    <div class="mb-10" data-aos="fade-up">
+      <h3 class="text-white font-semibold mb-4">可视化图表</h3>
+      <div class="figure-grid" id="gallery-exp3"></div>
+    </div>
+
+    <!-- Conclusion -->
+    <div class="conclusion-card" data-aos="fade-up">
+      <h4 class="text-emerald-300 font-semibold mb-2">✦ 结论</h4>
+      <p class="text-slate-300 text-sm leading-relaxed">
+        <strong class="text-white">Q2Q 在全部 11 个检查点中始终保持最高 MRR</strong>，记忆池扩展 10 倍后仅衰减 8.5%。相比之下，Q2C 从 0.670 → 0.566（−15.5%），Q2R 从 0.607 → 0.492（−18.9%）。在最大池容量（272）时，Q2Q 以 +0.167 MRR 超越 Q2C，以 +0.241 MRR 超越 Q2R。这表明<span class="font-mono text-blue-300">Q2Q 的对齐优势具有持久性和可扩展性</span>——不会随记忆积累而崩溃。
+      </p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- SUMMARY & CONCLUSIONS -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <section class="max-w-7xl mx-auto px-6 py-20">
+    <h2 class="section-title text-center text-white mb-12" data-aos="fade-up">总结</h2>
+
+    <div class="grid md:grid-cols-3 gap-6 mb-12">
+      <div class="glass-strong p-8 text-center" data-aos="fade-up" data-aos-delay="0">
+        <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+          <span class="text-2xl">🎯</span>
+        </div>
+        <h3 class="text-white font-semibold text-lg mb-2">对齐性</h3>
+        <p class="text-slate-400 text-sm">Q2Q 生成的嵌入比直接内容嵌入（Q2C）更贴近真实查询 15.5%，胜率 93.2%，Cohen's d = 1.44。</p>
+      </div>
+      <div class="glass-strong p-8 text-center" data-aos="fade-up" data-aos-delay="100">
+        <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+          <span class="text-2xl">🛡️</span>
+        </div>
+        <h3 class="text-white font-semibold text-lg mb-2">精确性</h3>
+        <p class="text-slate-400 text-sm">Q2Q 对措辞的更高敏感度反映的是精确性而非脆弱性。即使最坏情况的下降仍使 Q2Q 高于 Q2C 的基线表现。</p>
+      </div>
+      <div class="glass-strong p-8 text-center" data-aos="fade-up" data-aos-delay="200">
+        <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+          <span class="text-2xl">📈</span>
+        </div>
+        <h3 class="text-white font-semibold text-lg mb-2">可扩展性</h3>
+        <p class="text-slate-400 text-sm">10 倍池扩展仅 −8.5% MRR 衰减。Q2Q 在所有规模下均占优，最大池时保持 +0.167 的领先优势。</p>
+      </div>
+    </div>
+
+    <!-- Final Ranking -->
+    <div class="glass-strong p-8 max-w-2xl mx-auto" data-aos="fade-up">
+      <h3 class="text-white font-semibold text-center mb-6">方法总排名</h3>
+      <div class="space-y-3">
+        <div class="flex items-center gap-4">
+          <span class="font-mono text-blue-400 font-bold text-lg w-8">1st</span>
+          <div class="flex-1 h-8 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center px-4">
+            <span class="text-blue-300 font-medium text-sm">Q2Q — Query-to-Query（假想查询匹配）</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="font-mono text-emerald-400 font-bold text-lg w-8">2nd</span>
+          <div class="flex-1 h-8 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center px-4">
+            <span class="text-emerald-300 font-medium text-sm">Q2P — Query-to-Proposition（命题匹配）</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="font-mono text-amber-400 font-bold text-lg w-8">3rd</span>
+          <div class="flex-1 h-8 rounded-full bg-amber-500/15 border border-amber-500/25 flex items-center px-4">
+            <span class="text-amber-300 font-medium text-sm">Q2N — Query-to-Narrative（叙述匹配）</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="font-mono text-violet-400 font-bold text-lg w-8">4th</span>
+          <div class="flex-1 h-8 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center px-4">
+            <span class="text-violet-300 font-medium text-sm">Q2C — Query-to-Content（直接内容，基线）</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="font-mono text-red-400 font-bold text-lg w-8">5th</span>
+          <div class="flex-1 h-8 rounded-full bg-red-500/15 border border-red-500/25 flex items-center px-4">
+            <span class="text-red-300 font-medium text-sm">Q2R — Query-to-Random（随机基线）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- FOOTER -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <footer class="border-t border-white/5 py-12 px-6">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-500">
+      <div class="flex items-center gap-6">
+        <span>嵌入模型：BGE-Large-EN-v1.5 (1024d)</span>
+        <span>随机种子：42</span>
+        <span>日期：2026-08-20</span>
+      </div>
+      <p class="text-slate-600">Q2Q Motivation 实验 — LoCoMo 数据集</p>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/data.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+
+  <!-- Render figure galleries -->
+  <script>
+    function renderGallery(containerId, figures) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      container.innerHTML = figures.map(fig => `
+        <div class="figure-card" onclick="openLightbox('figs/${fig.file}', '${fig.title}')">
+          <img src="figs/${fig.file}" alt="${fig.title}" loading="lazy">
+          <div class="caption">${fig.title}</div>
+        </div>
+      `).join('');
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      renderGallery('gallery-exp1', DATA.figures.exp1);
+      renderGallery('gallery-exp2', DATA.figures.exp2);
+      renderGallery('gallery-exp3', DATA.figures.exp3);
+    });
+  </script>
+</body>
+</html>

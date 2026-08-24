@@ -26,17 +26,39 @@ class EmbeddingConfig:
 
 
 @dataclass
+class PreprocessingConfig:
+    compressor_model: str = ""
+    compressor_device: str = "cpu"
+    perplexity_threshold: float = 5.0
+    proposition_mode: str = "llm"
+    nlp_rule_model: str = "en_core_web_sm"
+    nlp_inference_model: str = ""
+
+
+@dataclass
+class GraphConfig:
+    evolve_threshold: float = 0.6
+    diverge_low: float = 0.2
+    diverge_high: float = 0.6
+    max_parents: int = 3
+    maintenance_interval: int = 10
+    merge_overlap_threshold: float = 0.9
+    max_chain_length: int = 6
+    chain_sample_interval: int = 2
+    similarity_top_k: int = 5
+
+
+@dataclass
 class RetrievalConfig:
     alpha: float = 0.7
     top_k_per_sub: int = 20
     top_n: int = 5
     top_k_q2c: int = 3
     num_fake_queries: int = 10
-    version_threshold: float = 0.80
-    version_chain_depth: int = 3
     max_context_tokens: int = 10000
-    fq_confidence_threshold: float = 0.80
-    paragraph_top_k: int = 3
+    chain_depth: int = 3
+    prop_top_k_per_fq: int = 3
+    binding_verify_threshold: float = 0.8
 
 
 @dataclass
@@ -58,6 +80,8 @@ class LogConfig:
 class Q2QConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
+    graph: GraphConfig = field(default_factory=GraphConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     log: LogConfig = field(default_factory=LogConfig)
@@ -65,11 +89,6 @@ class Q2QConfig:
 
     @classmethod
     def from_env(cls, env_path: str | None = None) -> Q2QConfig:
-        """Load environment-level config from .env file.
-
-        Only loads infrastructure settings (API keys, paths, model names).
-        Runtime hyperparameters use defaults and should be overridden by scripts/CLI.
-        """
         if env_path:
             load_dotenv(env_path, override=True)
         else:
@@ -80,7 +99,6 @@ class Q2QConfig:
 
         config = cls()
 
-        # --- Environment-level: API keys, endpoints, model paths ---
         config.llm.provider = os.getenv("LLM_PROVIDER", "openai")
         config.llm.model = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
         config.llm.api_key = os.getenv("OPENAI_API_KEY", "")
@@ -90,23 +108,21 @@ class Q2QConfig:
         config.embedding.model_name = os.getenv("DEFAULT_EMBEDDING_MODEL", "")
         config.embedding.device = os.getenv("EMBEDDING_DEVICE", "cpu")
 
-        # Storage paths (from env)
+        config.preprocessing.compressor_model = os.getenv(
+            "COMPRESSOR_MODEL", "<MODELS_DIR>/Qwen2.5-0.5B-Instruct"
+        )
+        config.preprocessing.compressor_device = os.getenv("COMPRESSOR_DEVICE", "cpu")
+        config.preprocessing.proposition_mode = os.getenv("PROPOSITION_MODE", "llm")
+        config.preprocessing.nlp_inference_model = os.getenv(
+            "NLP_INFERENCE_MODEL", "<MODELS_DIR>/flan-t5-large"
+        )
+
         config.storage.chromadb_path = os.getenv("STORAGE_CHROMADB_PATH", "data/chromadb")
         config.storage.chromadb_collection = os.getenv("STORAGE_CHROMADB_COLLECTION", "q2q_memories")
         config.storage.json_path = os.getenv("STORAGE_JSON_PATH", "data/memories.json")
 
-        # Log paths (from env)
         config.log.level = os.getenv("LOG_LEVEL", "INFO")
         config.log.log_dir = os.getenv("LOG_DIR", "logs")
         config.log.output_dir = os.getenv("OUTPUT_DIR", "outputs")
-
-        # --- Defaults for runtime hyperparameters (overridden by scripts/CLI) ---
-        # These use class defaults, NOT read from .env
-        # config.retrieval.alpha = 0.7 (default)
-        # config.retrieval.top_k_per_sub = 5 (default)
-        # config.retrieval.top_n = 10 (default)
-        # config.retrieval.num_fake_queries = 5 (default)
-        # config.storage.backend = "chromadb" (default)
-        # config.language = "zh" (default)
 
         return config

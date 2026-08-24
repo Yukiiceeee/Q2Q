@@ -1,16 +1,20 @@
+"""Two-stage answerer: propositions first, fallback to session text."""
 from __future__ import annotations
+
 import logging
 
 import tiktoken
 
-from src.schemas.models import RetrievalResult, KnowledgePoint, SubQuery
+from src.schemas.models import RetrievalResult, Proposition, SubQuery
 from src.utils.llm_client import BaseLLMClient, format_messages
-from src.prompts.answer_gen import build_answer_gen_prompt
+from src.prompts.answer_gen import (
+    build_answer_gen_prompt_stage1,
+    build_answer_gen_prompt_stage2,
+)
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_CONTEXT_TOKENS = 10000
-DEFAULT_FQ_CONFIDENCE_THRESHOLD = 0.80
+INSUFFICIENT_MARKER = "[INSUFFICIENT]"
 
 
 class Answerer:
@@ -19,13 +23,11 @@ class Answerer:
         self,
         llm_client: BaseLLMClient,
         language: str = "zh",
-        max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
-        fq_confidence_threshold: float = DEFAULT_FQ_CONFIDENCE_THRESHOLD,
+        max_context_tokens: int = 10000,
     ):
         self.llm_client = llm_client
         self.language = language
         self.max_context_tokens = max_context_tokens
-        self.fq_confidence_threshold = fq_confidence_threshold
         try:
             self._tokenizer = tiktoken.encoding_for_model(llm_client.model)
         except (KeyError, AttributeError):
@@ -45,104 +47,100 @@ class Answerer:
     async def answer(
         self,
         raw_query: str,
-        results: list[RetrievalResult],
+        retrieval_result: RetrievalResult,
         history: str = "",
         sub_queries: list[SubQuery] | None = None,
     ) -> str:
-        memories_context = self._build_memories_context(results)
-        prompt = build_answer_gen_prompt(raw_query, memories_context, history, self.language)
-        messages = format_messages(user_message=prompt)
-        response = await self.llm_client.chat(messages, temperature=0.7)
-        return response.content
+        # === Stage 1: Answer from propositions ===
+        props_context = self._format_propositions(retrieval_result.ranked_propositions)
 
-    def _build_memories_context(self, results: list[RetrievalResult]) -> str:
-        if not results:
-            return "(无相关记忆)" if self.language == "zh" else "(No relevant memories found)"
+        if not props_context.strip():
+            if retrieval_result.session_texts:
+                return await self._stage2_answer(raw_query, "", retrieval_result, history)
+            return "未提及" if self.language == "zh" else "Not mentioned"
 
-        all_below_threshold = all(
-            r.final_score < self.fq_confidence_threshold for r in results
+        prompt_s1 = build_answer_gen_prompt_stage1(
+            raw_query, props_context, history, self.language
         )
+        messages_s1 = format_messages(user_message=prompt_s1)
+        response_s1 = await self.llm_client.chat(messages_s1, temperature=0.3)
+        answer_s1 = response_s1.content.strip()
+
+        logger.info(f"Stage 1 answer ({len(answer_s1)} chars)")
+
+        # Check if sufficient
+        if not self._is_insufficient(answer_s1):
+            return answer_s1
+
+        # === Stage 2: Supplement with session text ===
+        logger.info("Stage 1 insufficient, entering Stage 2")
+        clean_answer = answer_s1.replace(INSUFFICIENT_MARKER, "").strip()
+        return await self._stage2_answer(raw_query, props_context, retrieval_result, history)
+
+    async def _stage2_answer(
+        self,
+        raw_query: str,
+        props_context: str,
+        retrieval_result: RetrievalResult,
+        history: str,
+    ) -> str:
+        session_context = self._format_session_texts(retrieval_result.session_texts)
+
+        prompt_s2 = build_answer_gen_prompt_stage2(
+            raw_query, props_context, session_context, history, self.language
+        )
+        messages_s2 = format_messages(user_message=prompt_s2)
+        response_s2 = await self.llm_client.chat(messages_s2, temperature=0.3)
+        answer_s2 = response_s2.content.strip()
+
+        # Clean any remaining markers
+        answer_s2 = answer_s2.replace(INSUFFICIENT_MARKER, "").strip()
+        logger.info(f"Stage 2 answer ({len(answer_s2)} chars)")
+        return answer_s2
+
+    def _is_insufficient(self, response: str) -> bool:
+        return INSUFFICIENT_MARKER in response
+
+    def _format_propositions(self, propositions: list[Proposition]) -> str:
+        if not propositions:
+            return ""
 
         parts = []
         total_tokens = 0
-        per_memory_token_limit = max(self.max_context_tokens // len(results), 1500)
+        token_budget = self.max_context_tokens // 2
 
-        for i, r in enumerate(results, 1):
-            memory_content_parts = []
+        for i, prop in enumerate(propositions, 1):
+            line = f"[{i}] {prop.text}"
+            if prop.time:
+                line += f" (time: {prop.time})"
+            if prop.subject:
+                line += f" (subject: {prop.subject})"
 
-            if r.memory.knowledge_points:
-                kp_text = self._format_knowledge_points(
-                    r.memory.knowledge_points,
-                    per_memory_token_limit,
-                )
-                memory_content_parts.append(kp_text)
-
-            if not all_below_threshold and r.version_chain_context:
-                for chain_idx, chain in enumerate(r.version_chain_context):
-                    if len(chain) > 1:
-                        chain_header = (
-                            f"\n[知识演变 (链 {chain_idx + 1})]:"
-                            if self.language == "zh"
-                            else f"\n[Version History (chain {chain_idx + 1})]:"
-                        )
-                        chain_lines = [chain_header]
-                        for node in chain:
-                            chain_lines.append(f"  [d{node.depth}] {node.text}")
-                        memory_content_parts.append("\n".join(chain_lines))
-
-            if all_below_threshold and r.matched_paragraphs:
-                para_header = (
-                    "\n[相关片段]:" if self.language == "zh" else "\n[Relevant Excerpts]:"
-                )
-                para_lines = [para_header]
-                for j, para in enumerate(r.matched_paragraphs, 1):
-                    para_lines.append(f"  --- [{j}] ---")
-                    para_lines.append(f"  {para}")
-                memory_content_parts.append("\n".join(para_lines))
-
-            if not memory_content_parts:
-                continue
-
-            content = "\n".join(memory_content_parts)
-            content_tokens = self._count_tokens(content)
-            if content_tokens > per_memory_token_limit:
-                content = self._truncate_to_tokens(content, per_memory_token_limit)
-
-            confidence_label = "HIGH" if r.final_score >= self.fq_confidence_threshold else "LOW"
-            entry_text = (
-                f"### Memory {i} (relevance: {r.final_score:.3f}, confidence: {confidence_label})\n"
-                f"{content}"
-            )
-
-            entry_tokens = self._count_tokens(entry_text)
-            if total_tokens + entry_tokens > self.max_context_tokens:
-                remaining = self.max_context_tokens - total_tokens
-                if remaining > 200:
-                    entry_text = self._truncate_to_tokens(entry_text, remaining)
-                    parts.append(entry_text)
-                break
-            parts.append(entry_text)
-            total_tokens += entry_tokens
-
-        return "\n\n".join(parts)
-
-    def _format_knowledge_points(
-        self,
-        kps: list[KnowledgePoint],
-        token_limit: int,
-    ) -> str:
-        header = "Relevant Knowledge Points:" if self.language == "en" else "相关知识点:"
-        lines = [header]
-        total_tokens = self._count_tokens(header)
-
-        for kp in kps:
-            line = f"  - [{kp.time}] {kp.subject}: {kp.fact}"
-            if kp.entities_or_values:
-                line += f" ({kp.entities_or_values})"
             line_tokens = self._count_tokens(line)
-            if total_tokens + line_tokens > token_limit:
+            if total_tokens + line_tokens > token_budget:
                 break
-            lines.append(line)
+            parts.append(line)
             total_tokens += line_tokens
 
-        return "\n".join(lines)
+        return "\n".join(parts)
+
+    def _format_session_texts(self, session_texts: list[str]) -> str:
+        if not session_texts:
+            return ""
+
+        parts = []
+        total_tokens = 0
+        token_budget = self.max_context_tokens // 2
+
+        for i, text in enumerate(session_texts, 1):
+            header = f"--- Session {i} ---"
+            content = self._truncate_to_tokens(text, token_budget // max(len(session_texts), 1))
+            section = f"{header}\n{content}"
+
+            section_tokens = self._count_tokens(section)
+            if total_tokens + section_tokens > token_budget:
+                break
+            parts.append(section)
+            total_tokens += section_tokens
+
+        return "\n\n".join(parts)
