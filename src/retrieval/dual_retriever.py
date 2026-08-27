@@ -22,7 +22,6 @@ class DualRetriever:
         embedding_provider: BaseEmbeddingProvider,
         memory_store: BaseMemoryStore,
         graph_manager: MemoryGraphManager,
-        alpha: float = 0.7,
         top_k_per_sub: int = 20,
         top_n: int = 5,
         top_k_q2c: int = 3,
@@ -32,7 +31,6 @@ class DualRetriever:
         self.embedding_provider = embedding_provider
         self.memory_store = memory_store
         self.graph_manager = graph_manager
-        self.alpha = alpha
         self.top_k_per_sub = top_k_per_sub
         self.top_n = top_n
         self.top_k_q2c = top_k_q2c
@@ -50,34 +48,55 @@ class DualRetriever:
         # === Q2C Path ===
         q2c_result = await self._q2c_retrieve(valid_sqs)
 
-        # === Proposition Reranking ===
-        ranked_props = await self._rerank_propositions(
-            q2q_result["all_fqs"], valid_sqs
+        # === Proposition Reranking (from chain FQs only) ===
+        chain_props = await self._rerank_propositions(
+            q2q_result["chain_fqs"], valid_sqs
         )
 
-        # === Build final result ===
-        session_texts = []
+        # === Direct FQ → session compressed texts ===
+        direct_session_ids: set[str] = set()
+        direct_session_texts: list[str] = []
+        for fq in q2q_result["direct_fqs"]:
+            if fq.session_id and fq.session_id not in direct_session_ids:
+                direct_session_ids.add(fq.session_id)
+                entry = await self.memory_store.get_by_id(fq.session_id)
+                if entry and entry.pre_session_text:
+                    direct_session_texts.append(entry.pre_session_text)
+                elif entry and entry.session_text:
+                    direct_session_texts.append(entry.session_text[:8000])
+
+        # === Q2C fallback session texts (excluding already-seen sessions) ===
+        q2c_session_texts: list[str] = []
         for hit in q2c_result:
-            entry = await self.memory_store.get_by_id(hit["session_id"])
-            if entry and entry.pre_session_text:
-                session_texts.append(entry.pre_session_text)
-            elif entry:
-                session_texts.append(entry.session_text[:2000])
+            sid = hit["session_id"]
+            if sid not in direct_session_ids:
+                entry = await self.memory_store.get_by_id(sid)
+                if entry and entry.pre_session_text:
+                    q2c_session_texts.append(entry.pre_session_text)
+                elif entry and entry.session_text:
+                    q2c_session_texts.append(entry.session_text[:8000])
+
+        # Legacy session_texts for backward compat
+        all_session_texts = direct_session_texts + q2c_session_texts
 
         result = RetrievalResult(
             matched_fqs=q2q_result["direct_fqs"],
-            ranked_propositions=ranked_props,
-            session_texts=session_texts[:self.top_n],
+            ranked_propositions=chain_props,
+            session_texts=all_session_texts[:self.top_n],
             q2q_scores=q2q_result["scores"],
             q2c_scores={h["session_id"]: h["score"] for h in q2c_result},
             chain_fqs=q2q_result["chain_fqs"],
+            direct_session_texts=direct_session_texts,
+            chain_propositions=chain_props,
+            q2c_session_texts=q2c_session_texts[:self.top_n],
         )
 
         logger.info(
-            f"Retrieval done: {len(result.matched_fqs)} direct FQs, "
-            f"{len(result.chain_fqs)} chain FQs, "
-            f"{len(result.ranked_propositions)} propositions, "
-            f"{len(result.session_texts)} session texts"
+            f"Retrieval done: {len(result.matched_fqs)} direct FQs → "
+            f"{len(direct_session_texts)} session texts, "
+            f"{len(result.chain_fqs)} chain FQs → "
+            f"{len(chain_props)} chain propositions, "
+            f"{len(q2c_session_texts)} Q2C fallback sessions"
         )
         return result
 

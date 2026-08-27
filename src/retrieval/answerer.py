@@ -1,4 +1,4 @@
-"""Two-stage answerer: propositions first, fallback to session text."""
+"""Two-stage answerer: Stage 1 uses direct session texts + chain propositions; Stage 2 supplements with Q2C."""
 from __future__ import annotations
 
 import logging
@@ -51,16 +51,17 @@ class Answerer:
         history: str = "",
         sub_queries: list[SubQuery] | None = None,
     ) -> str:
-        # === Stage 1: Answer from propositions ===
-        props_context = self._format_propositions(retrieval_result.ranked_propositions)
+        # === Stage 1: Direct FQ session texts + chain propositions ===
+        stage1_context = self._build_stage1_context(retrieval_result)
 
-        if not props_context.strip():
-            if retrieval_result.session_texts:
+        if not stage1_context.strip():
+            # No Q2Q results at all, fall directly to Q2C
+            if retrieval_result.q2c_session_texts:
                 return await self._stage2_answer(raw_query, "", retrieval_result, history)
             return "未提及" if self.language == "zh" else "Not mentioned"
 
         prompt_s1 = build_answer_gen_prompt_stage1(
-            raw_query, props_context, history, self.language
+            raw_query, stage1_context, history, self.language
         )
         messages_s1 = format_messages(user_message=prompt_s1)
         response_s1 = await self.llm_client.chat(messages_s1, temperature=0.3)
@@ -68,32 +69,71 @@ class Answerer:
 
         logger.info(f"Stage 1 answer ({len(answer_s1)} chars)")
 
-        # Check if sufficient
         if not self._is_insufficient(answer_s1):
             return answer_s1
 
-        # === Stage 2: Supplement with session text ===
-        logger.info("Stage 1 insufficient, entering Stage 2")
-        clean_answer = answer_s1.replace(INSUFFICIENT_MARKER, "").strip()
-        return await self._stage2_answer(raw_query, props_context, retrieval_result, history)
+        # === Stage 2: Supplement with Q2C session texts ===
+        logger.info("Stage 1 insufficient, entering Stage 2 with Q2C context")
+        return await self._stage2_answer(raw_query, stage1_context, retrieval_result, history)
+
+    def _build_stage1_context(self, retrieval_result: RetrievalResult) -> str:
+        parts = []
+        total_tokens = 0
+        token_budget = self.max_context_tokens
+
+        # Part A: Direct FQ → session compressed texts (primary, high-information)
+        direct_texts = retrieval_result.direct_session_texts
+        if direct_texts:
+            session_budget = int(token_budget * 0.7)
+            per_session_budget = session_budget // max(len(direct_texts), 1)
+
+            for i, text in enumerate(direct_texts, 1):
+                header = f"--- Session {i} (Direct Match) ---"
+                content = self._truncate_to_tokens(text, per_session_budget)
+                section = f"{header}\n{content}"
+
+                section_tokens = self._count_tokens(section)
+                if total_tokens + section_tokens > token_budget:
+                    break
+                parts.append(section)
+                total_tokens += section_tokens
+
+        # Part B: Chain FQ → propositions (supplementary structured info)
+        chain_props = retrieval_result.chain_propositions
+        if chain_props:
+            prop_budget = token_budget - total_tokens
+            if prop_budget > 200:
+                parts.append("\n--- Chain-linked Propositions ---")
+                for j, prop in enumerate(chain_props, 1):
+                    line = f"[C{j}] {prop.text}"
+                    line_tokens = self._count_tokens(line)
+                    if total_tokens + line_tokens > token_budget:
+                        break
+                    parts.append(line)
+                    total_tokens += line_tokens
+
+        return "\n".join(parts)
 
     async def _stage2_answer(
         self,
         raw_query: str,
-        props_context: str,
+        stage1_context: str,
         retrieval_result: RetrievalResult,
         history: str,
     ) -> str:
-        session_context = self._format_session_texts(retrieval_result.session_texts)
+        # Use Q2C session texts as supplementary context
+        q2c_context = self._format_q2c_sessions(retrieval_result.q2c_session_texts)
+
+        if not q2c_context.strip() and not stage1_context.strip():
+            return "未提及" if self.language == "zh" else "Not mentioned"
 
         prompt_s2 = build_answer_gen_prompt_stage2(
-            raw_query, props_context, session_context, history, self.language
+            raw_query, stage1_context, q2c_context, history, self.language
         )
         messages_s2 = format_messages(user_message=prompt_s2)
         response_s2 = await self.llm_client.chat(messages_s2, temperature=0.3)
         answer_s2 = response_s2.content.strip()
 
-        # Clean any remaining markers
         answer_s2 = answer_s2.replace(INSUFFICIENT_MARKER, "").strip()
         logger.info(f"Stage 2 answer ({len(answer_s2)} chars)")
         return answer_s2
@@ -101,40 +141,18 @@ class Answerer:
     def _is_insufficient(self, response: str) -> bool:
         return INSUFFICIENT_MARKER in response
 
-    def _format_propositions(self, propositions: list[Proposition]) -> str:
-        if not propositions:
+    def _format_q2c_sessions(self, q2c_texts: list[str]) -> str:
+        if not q2c_texts:
             return ""
 
         parts = []
         total_tokens = 0
         token_budget = self.max_context_tokens // 2
 
-        for i, prop in enumerate(propositions, 1):
-            line = f"[{i}] {prop.text}"
-            if prop.time:
-                line += f" (time: {prop.time})"
-            if prop.subject:
-                line += f" (subject: {prop.subject})"
-
-            line_tokens = self._count_tokens(line)
-            if total_tokens + line_tokens > token_budget:
-                break
-            parts.append(line)
-            total_tokens += line_tokens
-
-        return "\n".join(parts)
-
-    def _format_session_texts(self, session_texts: list[str]) -> str:
-        if not session_texts:
-            return ""
-
-        parts = []
-        total_tokens = 0
-        token_budget = self.max_context_tokens // 2
-
-        for i, text in enumerate(session_texts, 1):
-            header = f"--- Session {i} ---"
-            content = self._truncate_to_tokens(text, token_budget // max(len(session_texts), 1))
+        for i, text in enumerate(q2c_texts, 1):
+            header = f"--- Q2C Session {i} ---"
+            per_budget = token_budget // max(len(q2c_texts), 1)
+            content = self._truncate_to_tokens(text, per_budget)
             section = f"{header}\n{content}"
 
             section_tokens = self._count_tokens(section)

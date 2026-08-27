@@ -55,6 +55,9 @@ class QueryDecomposer:
     def _parse_sub_queries(self, content: str) -> list[dict]:
         content = content.strip()
 
+        # Strip <think>...</think> reasoning block if present
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
         parsed = self._try_json_parse(content)
         if parsed:
             return parsed

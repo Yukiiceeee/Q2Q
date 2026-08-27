@@ -68,6 +68,8 @@ class Q2QAgent:
             num_queries=config.retrieval.num_fake_queries,
             language=config.language,
             binding_verify_threshold=config.retrieval.binding_verify_threshold,
+            style=config.retrieval.fq_style,
+            role=config.retrieval.fq_role,
         )
 
         self.memory_constructor = MemoryConstructor(
@@ -104,7 +106,6 @@ class Q2QAgent:
             embedding_provider=self.embedding_provider,
             memory_store=self.memory_store,
             graph_manager=self.graph_manager,
-            alpha=config.retrieval.alpha,
             top_k_per_sub=config.retrieval.top_k_per_sub,
             top_n=config.retrieval.top_n,
             top_k_q2c=config.retrieval.top_k_q2c,

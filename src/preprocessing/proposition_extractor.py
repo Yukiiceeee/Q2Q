@@ -63,20 +63,38 @@ class PropositionExtractor:
 
         propositions = []
         for i, item in enumerate(raw_props):
+            time_val = item.get("time", "")
+            subject = item.get("subject", "")
+            fact = item.get("fact", item.get("text", ""))
+            entities_or_values = item.get("entities_or_values", item.get("entities", []))
+
+            if isinstance(entities_or_values, str):
+                entities_or_values = [e.strip() for e in entities_or_values.split(",") if e.strip()]
+
+            # Build structured text: [time] subject + fact
+            if time_val and subject:
+                text = f"[{time_val}] {subject}: {fact}"
+            elif time_val:
+                text = f"[{time_val}] {fact}"
+            elif subject:
+                text = f"{subject}: {fact}"
+            else:
+                text = fact
+
             prop = Proposition(
                 prop_id=f"P{i+1}",
-                text=item.get("text", item.get("fact", "")),
+                text=text,
                 source="llm",
                 session_id=session_id,
-                time=item.get("time", ""),
-                subject=item.get("subject", ""),
-                predicate=item.get("predicate", ""),
-                object_value=item.get("object_value", item.get("entities_or_values", "")),
-                entities=item.get("entities", []),
+                time=time_val,
+                subject=subject,
+                predicate="",
+                object_value=fact,
+                entities=entities_or_values,
             )
             propositions.append(prop)
 
-        logger.info(f"LLM extraction: {len(propositions)} propositions")
+        logger.info(f"LLM extraction: {len(propositions)} propositions (structured KP format)")
         return propositions
 
     def _build_extraction_prompt(self, session_text: str) -> str:
@@ -230,61 +248,127 @@ class ModelBasedExtractor:
         return propositions
 
 
-PROPOSITION_EXTRACTION_PROMPT_ZH = """你是一个精确的命题提取助手。给定一段对话记录，从中提取所有原子化命题（Propositions）。
+PROPOSITION_EXTRACTION_PROMPT_ZH = """你是一个精确的知识点提取助手。给定一段对话记录，从中提取所有结构化知识点（Knowledge Points）。
 
-## 命题格式
-每个命题必须包含以下字段：
-- **text**: 完整的命题陈述（一个独立的、可验证的事实）
-- **time**: 事件发生的时间（若有）
-- **subject**: 命题的主体
-- **predicate**: 谓词/动作/关系
-- **object_value**: 宾语/数值/结果
-- **entities**: 涉及的关键实体列表
+## 知识点格式
+每个知识点必须包含以下四个字段：
+- **time**: 事件发生的绝对日期。如果某人在 2023年7月6日 的对话中说"我昨天去了博物馆"，则 time 为 "2023-07-05"。无法确定时间时留空字符串。
+- **subject**: 知识点的主体（具体人物名、实体名，不要用代词）
+- **fact**: 关于主体的**高密度事实陈述**。必须遵循"动作/状态 + 对象 + 全部修饰语（时间/地点/数量/方式/原因/结果）"模式。保留原文中所有具体信息，不做任何概括。
+- **entities_or_values**: 该知识点中能**唯一区分此事件**的关键标识符列表。必须包含：所有专有名词（人名、地名、机构名、书名、药品名等）、所有数值指标（含单位）、所有日期。
 
-## 提取要求
-1. 每个命题必须是原子化的，只包含一个独立事实
-2. 命题必须具体、可验证，包含具体数值、时间、实体名称
-3. 全面覆盖：事实陈述、时间信息、决策行动、状态变化、因果关系、观点偏好
-4. 不遗漏任何关键信息
+## 关键时间规则
+- time 字段必须是"事件发生时间"，**不是**对话时间戳。
+- 必须将所有相对时间引用（昨天、上周、两天前、那个周末等）转换为绝对日期。
+- 对话时间戳信息在对话前缀中，利用它来推算绝对时间。
+- 无法推算的情况留空字符串。
+
+## fact 字段信息密度要求（极其重要）
+每条 fact 必须达到"看到这一条就能回答相关问题"的完整程度：
+
+**好的 fact（信息完整、自包含）**：
+- "张某因左膝关节疼痛加重2周，于市中心人民医院骨科就诊，膝关节X线显示内侧间隙狭窄"
+- "李医生将阿莫西林剂量从每日500mg×3次调整为每日750mg×2次，原因是患者出现了胃肠道不适"
+- "患者体重从2023年1月的85kg降至2023年6月的78kg，降幅7kg，归因于低碳饮食方案"
+
+**差的 fact（信息丢失、需要上下文）**：
+- "去了医院看骨科" ← 缺少人名、医院名、症状、检查结果
+- "调整了药物剂量" ← 缺少药名、原剂量、新剂量、调整原因
+- "体重下降了" ← 缺少具体数值、时间跨度、原因
+
+## 强制覆盖维度（每一类都不得遗漏）
+1. **具体活动/事件**：提到的任何活动，无论多简短或一笔带过
+2. **个人状态/属性**：感情状态、职业、年龄、居住情况、健康、教育、身份
+3. **时间事件**：含有具体日期或时间引用的事件
+4. **决策与计划**：计划要做的事、正在研究/考虑的事
+5. **人际关系**：谁认识谁、什么关系、关系变化
+6. **观点与偏好**：喜好、厌恶、爱好、兴趣、评价
+7. **量化事实**：数字、时长、频率、数量、金额、排名
+8. **因果链条**：做决定的原因、事件的影响、动机
+
+## 关键提取规则
+- **信息零损耗**：原文提到的每一个具体数字、名称、日期、地点都必须出现在某条 fact 中。
+- **宁多勿少**：提取每一个具体事实，无论多细微。
+- **一句多提**：一句话可产生多个知识点，不要合并多个不同事实为一条。
+- **顺带提及也提取**：某人顺带提到做了某事，也必须独立提取。
+- **保持自包含**：每条 fact 必须独立可理解，包含足够的主体和背景信息。用全名不用代词。
+- **全面覆盖**：确保对话中的每一个信息点都被至少一条知识点覆盖。
+- **禁止概括**：不要用"等"、"相关"、"之类"等模糊词替代具体列举。
 
 ## 会话内容
 {session_text}
 
 ## 输出
-以 JSON 数组形式输出所有命题：
+以 JSON 数组形式输出所有知识点（通常一段对话应提取 20-60 条）：
 ```json
 [
-  {{"text": "...", "time": "...", "subject": "...", "predicate": "...", "object_value": "...", "entities": ["...", "..."]}},
-  ...
+  {{"time": "2023-07-05", "subject": "Melanie", "fact": "Melanie带两个孩子（Jake和Lily）去了芝加哥自然历史博物馆参观恐龙化石展，在博物馆待了约3小时", "entities_or_values": ["Melanie", "Jake", "Lily", "芝加哥自然历史博物馆", "恐龙化石展", "3小时"]}},
+  {{"time": "", "subject": "Caroline", "fact": "Caroline目前是单身状态，上一段恋情在6个月前结束，前男友名叫Daniel", "entities_or_values": ["Caroline", "Daniel", "6个月前"]}},
+  {{"time": "2023-07-01", "subject": "我", "fact": "我在GoodLife健身房开始了为期12周的力量训练计划，每周一/三/五去，每次约1小时", "entities_or_values": ["GoodLife健身房", "12周", "力量训练", "每周3次", "1小时"]}},
+  {{"time": "2023-07-04", "subject": "Tom", "fact": "Tom被确诊为2型糖尿病，空腹血糖8.2mmol/L，医生开了二甲双胍500mg每日两次", "entities_or_values": ["Tom", "2型糖尿病", "空腹血糖", "8.2mmol/L", "二甲双胍", "500mg", "每日两次"]}}
 ]
 ```"""
 
 
-PROPOSITION_EXTRACTION_PROMPT_EN = """You are a precise proposition extraction assistant. Given a conversation record, extract ALL atomic propositions from it.
+PROPOSITION_EXTRACTION_PROMPT_EN = """You are a precise knowledge point extraction assistant. Given a conversation record, extract ALL structured knowledge points from it.
 
-## Proposition Format
-Each proposition MUST contain:
-- **text**: Complete propositional statement (one independent, verifiable fact)
-- **time**: When the event occurred (if available)
-- **subject**: The subject of the proposition
-- **predicate**: The verb/action/relationship
-- **object_value**: The object/value/result
-- **entities**: List of key entities involved
+## Knowledge Point Format
+Each knowledge point MUST contain these four fields:
+- **time**: The absolute date when the event occurred. If someone says "Yesterday I went to the museum" in a conversation dated July 6, 2023, time is "July 5, 2023". Leave as empty string if time cannot be determined.
+- **subject**: The subject of the knowledge point (use specific person names or entity names, NEVER use pronouns)
+- **fact**: A **high-density factual statement** about the subject. Must follow the pattern: "action/state + object + ALL modifiers (time/place/quantity/manner/cause/result)". Retain ALL specific information from the original text without any generalization.
+- **entities_or_values**: List of **uniquely distinguishing identifiers** for this event. MUST include: all proper nouns (person names, place names, organization names, book titles, drug names, etc.), all numeric indicators (with units), all dates mentioned.
 
-## Extraction Requirements
-1. Each proposition must be atomic — containing exactly ONE independent fact
-2. Propositions must be specific and verifiable with concrete values, times, entity names
-3. Cover all dimensions: facts, temporal info, decisions, state changes, causal relations, opinions
-4. Do NOT omit any key information
+## Critical Time Rules
+- The time field must be the EVENT occurrence time, NOT the conversation timestamp.
+- Convert ALL relative time references (yesterday, last week, two days ago, that weekend, etc.) to absolute dates.
+- Use the conversation timestamp prefix to calculate absolute dates.
+- Leave as empty string when calculation is impossible.
+
+## Fact Field Information Density Requirement (CRITICAL)
+Each fact must be complete enough that "reading this single fact alone can answer a question about it":
+
+**GOOD facts (information-complete, self-contained)**:
+- "Sarah visited Dr. Martinez at Downtown Orthopedic Clinic for worsening left knee pain of 2 weeks duration, X-ray showed medial joint space narrowing"
+- "Dr. Chen changed amoxicillin dosage from 500mg three times daily to 750mg twice daily because the patient developed gastrointestinal discomfort"
+- "Patient's weight decreased from 85kg in January 2023 to 78kg in June 2023, a loss of 7kg, attributed to a low-carb diet plan"
+- "Emma recommended the book 'Atomic Habits' by James Clear, saying she read it in 3 days and it changed her morning routine"
+
+**BAD facts (information lost, context-dependent)**:
+- "went to the doctor for knee pain" ← missing: WHO, which doctor, which clinic, what findings
+- "medication dosage was adjusted" ← missing: which drug, old dose, new dose, reason for change
+- "lost some weight" ← missing: specific numbers, time span, method
+- "recommended a book" ← missing: WHO recommended, book title, author, why
+
+## Mandatory Coverage Dimensions (do NOT skip ANY category)
+1. **Concrete Activities/Events**: ANY activity mentioned, however briefly or casually
+2. **Personal Status/Attributes**: relationship status, job, age, living situation, health, education, identity
+3. **Temporal Events**: events with specific dates or time references
+4. **Decisions & Plans**: planned actions, things being researched/considered
+5. **Relationships Between People**: who knows whom, relationship type, changes in relationships
+6. **Opinions & Preferences**: likes, dislikes, hobbies, interests, evaluations
+7. **Quantitative Facts**: numbers, durations, frequencies, amounts, costs, rankings
+8. **Causal Chains**: reasons for decisions, effects of events, motivations
+
+## Critical Extraction Rules
+- **Zero information loss**: EVERY specific number, name, date, and place mentioned in the original text MUST appear in some fact.
+- **Extract MORE rather than fewer**: extract EVERY concrete fact, no matter how minor.
+- **One sentence, multiple KPs**: a single sentence can yield multiple knowledge points — do NOT merge distinct facts into one.
+- **Casual mentions count**: if someone casually mentions doing something, it MUST be extracted as a separate KP.
+- **Self-contained facts**: each `fact` field must be independently understandable with sufficient subject and context. Use full names, not pronouns.
+- **Full coverage**: ensure EVERY piece of information in the conversation is covered by at least one knowledge point.
+- **No vague language**: NEVER use "etc.", "related", "some", "various" or similar vague terms to replace specific enumeration.
 
 ## Session Content
 {session_text}
 
 ## Output
-Output all propositions as a JSON array:
+Output all knowledge points as a JSON array (typically 20-60 per conversation):
 ```json
 [
-  {{"text": "...", "time": "...", "subject": "...", "predicate": "...", "object_value": "...", "entities": ["...", "..."]}},
-  ...
+  {{"time": "July 5, 2023", "subject": "Melanie", "fact": "Melanie took her two children (Jake and Lily) to the Chicago Natural History Museum to see the dinosaur fossil exhibit, spending approximately 3 hours there", "entities_or_values": ["Melanie", "Jake", "Lily", "Chicago Natural History Museum", "dinosaur fossil exhibit", "3 hours"]}},
+  {{"time": "", "subject": "Caroline", "fact": "Caroline is currently single, her previous relationship with Daniel ended 6 months ago", "entities_or_values": ["Caroline", "Daniel", "6 months ago"]}},
+  {{"time": "July 1, 2023", "subject": "I", "fact": "I started a 12-week strength training program at GoodLife Gym, going Monday/Wednesday/Friday, approximately 1 hour per session", "entities_or_values": ["GoodLife Gym", "12 weeks", "strength training", "3 times per week", "1 hour"]}},
+  {{"time": "July 4, 2023", "subject": "Tom", "fact": "Tom was diagnosed with Type 2 diabetes, fasting blood glucose 8.2 mmol/L, prescribed metformin 500mg twice daily", "entities_or_values": ["Tom", "Type 2 diabetes", "fasting blood glucose", "8.2 mmol/L", "metformin", "500mg", "twice daily"]}}
 ]
 ```"""

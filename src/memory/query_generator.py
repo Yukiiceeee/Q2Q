@@ -1,4 +1,4 @@
-"""Fake Query Generator - proposition-based with binding verification."""
+"""Fake Query Generator - CoT multi-dimension routing with style/role control."""
 from __future__ import annotations
 
 import json
@@ -21,15 +21,19 @@ class FakeQueryGenerator:
         self,
         llm_client: BaseLLMClient,
         embedding_provider: BaseEmbeddingProvider,
-        num_queries: int = 10,
+        num_queries: int = 15,
         language: str = "zh",
         binding_verify_threshold: float = 0.8,
+        style: str = "formal",
+        role: str = "user",
     ):
         self.llm_client = llm_client
         self.embedding_provider = embedding_provider
         self.num_queries = num_queries
         self.language = language
         self.binding_verify_threshold = binding_verify_threshold
+        self.style = style
+        self.role = role
 
     async def generate(
         self,
@@ -41,8 +45,21 @@ class FakeQueryGenerator:
             logger.warning("No propositions provided, skipping FQ generation")
             return []
 
+        # Dynamic num_queries: max(configured, len(props))
+        dynamic_num = max(self.num_queries, len(propositions))
+        logger.info(
+            f"FQ generation: {len(propositions)} props → target {dynamic_num} queries "
+            f"(config={self.num_queries})"
+        )
+
         props_text = self._format_propositions(propositions)
-        prompt = build_fake_query_gen_prompt(props_text, self.num_queries, self.language)
+        prompt = build_fake_query_gen_prompt(
+            props_text,
+            dynamic_num,
+            self.language,
+            style=self.style,
+            role=self.role,
+        )
         messages = format_messages(user_message=prompt)
         response = await self.llm_client.chat(messages, temperature=0.7)
 
@@ -68,7 +85,10 @@ class FakeQueryGenerator:
             )
             fake_queries.append(fq)
 
-        logger.info(f"Generated {len(fake_queries)} fake queries from {len(propositions)} propositions")
+        logger.info(
+            f"Generated {len(fake_queries)} fake queries from {len(propositions)} propositions "
+            f"(style={self.style}, role={self.role})"
+        )
 
         fake_queries = await self._verify_bindings(fake_queries, propositions)
         return fake_queries
@@ -125,26 +145,68 @@ class FakeQueryGenerator:
     def _parse_response(self, content: str) -> list[dict]:
         content = content.strip()
 
-        parsed = self._try_json(content)
+        # Try parsing as the new CoT JSON format: {"_reasoning": ..., "queries": [...]}
+        parsed = self._try_cot_json(content)
+        if parsed is not None:
+            return parsed
+
+        # Fallback: try extracting JSON from code blocks
+        match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+        if match:
+            parsed = self._try_cot_json(match.group(1))
+            if parsed is not None:
+                return parsed
+
+        # Fallback: try extracting bare JSON object
+        match = re.search(r'\{[^{}]*"queries"\s*:\s*\[.*?\]\s*\}', content, re.DOTALL)
+        if match:
+            parsed = self._try_cot_json(match.group(0))
+            if parsed is not None:
+                return parsed
+
+        # Fallback: try legacy array format
+        parsed = self._try_legacy_array(content)
         if parsed is not None:
             return parsed
 
         match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', content, re.DOTALL)
         if match:
-            parsed = self._try_json(match.group(1))
+            parsed = self._try_legacy_array(match.group(1))
             if parsed is not None:
                 return parsed
 
         match = re.search(r'\[.*\]', content, re.DOTALL)
         if match:
-            parsed = self._try_json(match.group(0))
+            parsed = self._try_legacy_array(match.group(0))
             if parsed is not None:
                 return parsed
 
         logger.warning("Failed to parse FQ generation response")
         return []
 
-    def _try_json(self, text: str) -> list[dict] | None:
+    def _try_cot_json(self, text: str) -> list[dict] | None:
+        try:
+            result = json.loads(text)
+            if isinstance(result, dict) and "queries" in result:
+                queries = result["queries"]
+                if isinstance(queries, list):
+                    reasoning = result.get("_reasoning", "")
+                    if reasoning:
+                        logger.info(f"FQ reasoning: {reasoning[:200]}")
+                    valid = []
+                    for item in queries:
+                        if isinstance(item, dict) and "query" in item:
+                            if "answer_source" not in item:
+                                item["answer_source"] = []
+                            elif isinstance(item["answer_source"], str):
+                                item["answer_source"] = [item["answer_source"]]
+                            valid.append(item)
+                    return valid if valid else None
+        except json.JSONDecodeError:
+            pass
+        return None
+
+    def _try_legacy_array(self, text: str) -> list[dict] | None:
         try:
             result = json.loads(text)
             if isinstance(result, list):

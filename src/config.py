@@ -50,15 +50,16 @@ class GraphConfig:
 
 @dataclass
 class RetrievalConfig:
-    alpha: float = 0.7
     top_k_per_sub: int = 20
     top_n: int = 5
     top_k_q2c: int = 3
-    num_fake_queries: int = 10
+    num_fake_queries: int = 15
     max_context_tokens: int = 10000
     chain_depth: int = 3
     prop_top_k_per_fq: int = 3
     binding_verify_threshold: float = 0.8
+    fq_style: str = "formal"    # formal | colloquial | keyword | elliptical
+    fq_role: str = "user"       # user | otherside
 
 
 @dataclass
@@ -120,6 +121,9 @@ class Q2QConfig:
         config.storage.chromadb_path = os.getenv("STORAGE_CHROMADB_PATH", "data/chromadb")
         config.storage.chromadb_collection = os.getenv("STORAGE_CHROMADB_COLLECTION", "q2q_memories")
         config.storage.json_path = os.getenv("STORAGE_JSON_PATH", "data/memories.json")
+
+        config.retrieval.fq_style = os.getenv("FQ_STYLE", "formal")
+        config.retrieval.fq_role = os.getenv("FQ_ROLE", "user")
 
         config.log.level = os.getenv("LOG_LEVEL", "INFO")
         config.log.log_dir = os.getenv("LOG_DIR", "logs")
