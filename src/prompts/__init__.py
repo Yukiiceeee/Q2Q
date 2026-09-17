@@ -14,8 +14,7 @@ from src.prompts.query_format import (
     get_query_format_spec,
 )
 from src.prompts.answer_gen import (
-    build_answer_gen_prompt_stage1,
-    build_answer_gen_prompt_stage2,
+    build_answer_gen_prompt,
 )
 
 __all__ = [
@@ -28,6 +27,5 @@ __all__ = [
     "QUERY_FORMAT_SPEC_EN",
     "QUERY_FORMAT_SPEC_ZH",
     "get_query_format_spec",
-    "build_answer_gen_prompt_stage1",
-    "build_answer_gen_prompt_stage2",
+    "build_answer_gen_prompt",
 ]

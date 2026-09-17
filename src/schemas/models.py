@@ -202,11 +202,12 @@ class RetrievalResult:
     q2q_scores: dict = field(default_factory=dict)
     q2c_scores: dict = field(default_factory=dict)
     chain_fqs: list[FakeQuery] = field(default_factory=list)
-    # Stage-aware context: direct FQ → session texts, chain FQ → propositions
+    # Q2Q path: direct FQ → session compressed texts
     direct_session_texts: list[str] = field(default_factory=list)
+    # Q2Q chain: propositions from DAG chain expansion (deduplicated)
     chain_propositions: list[Proposition] = field(default_factory=list)
-    # Q2C fallback session texts (used only in Stage 2)
-    q2c_session_texts: list[str] = field(default_factory=list)
+    # Q2C path: propositions from content-matched sessions
+    q2c_propositions: list[Proposition] = field(default_factory=list)
 
 
 @dataclass

@@ -29,7 +29,7 @@ class EmbeddingConfig:
 class PreprocessingConfig:
     compressor_model: str = ""
     compressor_device: str = "cpu"
-    perplexity_threshold: float = 5.0
+    perplexity_threshold: float = 3.0
     proposition_mode: str = "llm"
     nlp_rule_model: str = "en_core_web_sm"
     nlp_inference_model: str = ""

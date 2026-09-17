@@ -48,7 +48,7 @@ class DualRetriever:
         # === Q2C Path ===
         q2c_result = await self._q2c_retrieve(valid_sqs)
 
-        # === Proposition Reranking (from chain FQs only) ===
+        # === Q2Q Chain Propositions (from chain FQs) ===
         chain_props = await self._rerank_propositions(
             q2q_result["chain_fqs"], valid_sqs
         )
@@ -65,38 +65,34 @@ class DualRetriever:
                 elif entry and entry.session_text:
                     direct_session_texts.append(entry.session_text[:8000])
 
-        # === Q2C fallback session texts (excluding already-seen sessions) ===
-        q2c_session_texts: list[str] = []
-        for hit in q2c_result:
-            sid = hit["session_id"]
-            if sid not in direct_session_ids:
-                entry = await self.memory_store.get_by_id(sid)
-                if entry and entry.pre_session_text:
-                    q2c_session_texts.append(entry.pre_session_text)
-                elif entry and entry.session_text:
-                    q2c_session_texts.append(entry.session_text[:8000])
+        # === Q2C → propositions from matched sessions (excluding direct hits) ===
+        q2c_props = await self._fetch_q2c_propositions(q2c_result, direct_session_ids, valid_sqs)
+
+        # === Merge chain_props + q2c_props for backward compat (ranked_propositions) ===
+        merged_props = self._merge_propositions(chain_props, q2c_props)
 
         # Legacy session_texts for backward compat
-        all_session_texts = direct_session_texts + q2c_session_texts
+        all_session_texts = direct_session_texts
 
         result = RetrievalResult(
             matched_fqs=q2q_result["direct_fqs"],
-            ranked_propositions=chain_props,
+            ranked_propositions=merged_props,
             session_texts=all_session_texts[:self.top_n],
             q2q_scores=q2q_result["scores"],
             q2c_scores={h["session_id"]: h["score"] for h in q2c_result},
             chain_fqs=q2q_result["chain_fqs"],
             direct_session_texts=direct_session_texts,
             chain_propositions=chain_props,
-            q2c_session_texts=q2c_session_texts[:self.top_n],
+            q2c_propositions=q2c_props,
         )
 
         logger.info(
             f"Retrieval done: {len(result.matched_fqs)} direct FQs → "
             f"{len(direct_session_texts)} session texts, "
             f"{len(result.chain_fqs)} chain FQs → "
-            f"{len(chain_props)} chain propositions, "
-            f"{len(q2c_session_texts)} Q2C fallback sessions"
+            f"{len(chain_props)} chain props, "
+            f"{len(q2c_props)} Q2C props, "
+            f"{len(merged_props)} merged (ranked) props total"
         )
         return result
 
@@ -149,6 +145,8 @@ class DualRetriever:
         }
 
     async def _q2c_retrieve(self, sub_queries: list[SubQuery]) -> list[dict]:
+        if self.top_k_q2c <= 0:
+            return []
         all_embeddings = [sq.embedding for sq in sub_queries]
         hits = await self.memory_store.batch_search_content(
             all_embeddings, top_k=self.top_k_q2c
@@ -215,6 +213,72 @@ class DualRetriever:
 
         max_props = self.prop_top_k_per_fq * len(all_fqs)
         return ranked[:max_props]
+
+    async def _fetch_q2c_propositions(
+        self, q2c_result: list[dict], exclude_session_ids: set[str], sub_queries: list[SubQuery]
+    ) -> list[Proposition]:
+        if not q2c_result:
+            return []
+
+        target_sids = [
+            hit["session_id"] for hit in q2c_result
+            if hit["session_id"] not in exclude_session_ids
+        ][:self.top_k_q2c]
+
+        if not target_sids:
+            return []
+
+        all_props: list[Proposition] = []
+        for sid in target_sids:
+            entry = await self.memory_store.get_by_id(sid)
+            if entry and entry.propositions:
+                all_props.extend(entry.propositions)
+
+        if not all_props:
+            return []
+
+        # Embed propositions that don't have embeddings
+        props_to_embed = [p for p in all_props if p.embedding is None]
+        if props_to_embed:
+            texts = [p.text for p in props_to_embed]
+            embeddings = await self.embedding_provider.embed_batch(texts)
+            for prop, emb in zip(props_to_embed, embeddings):
+                prop.embedding = emb
+
+        # Score against sub_queries and sort
+        scored: list[tuple[float, Proposition]] = []
+        for prop in all_props:
+            if prop.embedding is None:
+                continue
+            best_sim = max(
+                BaseEmbeddingProvider.cosine_similarity(sq.embedding, prop.embedding)
+                for sq in sub_queries
+                if sq.embedding is not None
+            )
+            scored.append((best_sim, prop))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [prop for _, prop in scored]
+
+    def _merge_propositions(
+        self, chain_props: list[Proposition], q2c_props: list[Proposition]
+    ) -> list[Proposition]:
+        seen_texts: set[str] = set()
+        merged: list[Proposition] = []
+
+        for prop in chain_props:
+            key = prop.text.strip()
+            if key not in seen_texts:
+                seen_texts.add(key)
+                merged.append(prop)
+
+        for prop in q2c_props:
+            key = prop.text.strip()
+            if key not in seen_texts:
+                seen_texts.add(key)
+                merged.append(prop)
+
+        return merged
 
     def _dict_to_fakequery(self, data: dict) -> FakeQuery:
         return FakeQuery(

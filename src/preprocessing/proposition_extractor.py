@@ -36,11 +36,11 @@ class PropositionExtractor:
                     model_path=nlp_inference_model_path, device=device
                 )
 
-    async def extract(self, session_text: str, session_id: str = "") -> list[Proposition]:
+    async def extract(self, session_text: str, session_id: str = "", session_date: str = "") -> list[Proposition]:
         if self.mode == "nlp":
             return self._extract_nlp(session_text, session_id)
         else:
-            return await self._extract_llm(session_text, session_id)
+            return await self._extract_llm(session_text, session_id, session_date)
 
     def _extract_nlp(self, session_text: str, session_id: str) -> list[Proposition]:
         rule_props = self._rule_extractor.extract(session_text, session_id)
@@ -55,8 +55,8 @@ class PropositionExtractor:
         logger.info(f"Merged propositions: {len(merged)}")
         return merged
 
-    async def _extract_llm(self, session_text: str, session_id: str) -> list[Proposition]:
-        prompt = self._build_extraction_prompt(session_text)
+    async def _extract_llm(self, session_text: str, session_id: str, session_date: str = "") -> list[Proposition]:
+        prompt = self._build_extraction_prompt(session_text, session_date)
         messages = format_messages(user_message=prompt)
         response = await self.llm_client.chat(messages, temperature=0.3)
         raw_props = self._parse_llm_response(response.content)
@@ -71,13 +71,11 @@ class PropositionExtractor:
             if isinstance(entities_or_values, str):
                 entities_or_values = [e.strip() for e in entities_or_values.split(",") if e.strip()]
 
-            # Build structured text: [time] subject + fact
-            if time_val and subject:
-                text = f"[{time_val}] {subject}: {fact}"
-            elif time_val:
-                text = f"[{time_val}] {fact}"
-            elif subject:
-                text = f"{subject}: {fact}"
+            # Build self-contained natural language text for embedding
+            # The fact field should include subject per prompt instructions,
+            # but we prepend subject if it's not already in the fact
+            if subject and subject.lower() not in fact.lower():
+                text = f"{subject} - {fact}"
             else:
                 text = fact
 
@@ -97,10 +95,16 @@ class PropositionExtractor:
         logger.info(f"LLM extraction: {len(propositions)} propositions (structured KP format)")
         return propositions
 
-    def _build_extraction_prompt(self, session_text: str) -> str:
+    def _build_extraction_prompt(self, session_text: str, session_date: str = "") -> str:
         if self.language == "zh":
-            return PROPOSITION_EXTRACTION_PROMPT_ZH.format(session_text=session_text)
-        return PROPOSITION_EXTRACTION_PROMPT_EN.format(session_text=session_text)
+            template = PROPOSITION_EXTRACTION_PROMPT_ZH
+        else:
+            template = PROPOSITION_EXTRACTION_PROMPT_EN
+
+        if session_date:
+            date_context = f"\n\n## Conversation Date Context\nThis conversation took place on: **{session_date}**\nUse this date as the anchor to resolve all relative time references (e.g., 'yesterday' = one day before {session_date}, 'last week' = the week before {session_date}, 'two months ago' = approximately two months before {session_date}).\n"
+            return template.format(session_text=session_text) + date_context
+        return template.format(session_text=session_text)
 
     def _parse_llm_response(self, content: str) -> list[dict]:
         content = content.strip()
@@ -261,7 +265,18 @@ PROPOSITION_EXTRACTION_PROMPT_ZH = """你是一个精确的知识点提取助手
 - time 字段必须是"事件发生时间"，**不是**对话时间戳。
 - 必须将所有相对时间引用（昨天、上周、两天前、那个周末等）转换为绝对日期。
 - 对话时间戳信息在对话前缀中，利用它来推算绝对时间。
-- 无法推算的情况留空字符串。
+- 仅当句子中完全没有任何时间引用（显式或隐式）时，time 字段才留空。
+- **强制规则**：如果句子包含任何相对时间表达，time 字段绝对不能为空。
+- 当无法精确定位但可大致推断时，使用"大约[日期]"格式（如"大约2023年6月"）。
+
+### 时间推理链（遵循以下步骤）
+1. 从对话时间戳前缀或上下文标题中确定对话日期。
+2. 对每个相对时间引用计算：对话日期 + 偏移 = 事件日期。
+3. 推算示例：
+   - 对话发生在"2023年7月6日" + "昨天" → time: "2023-07-05"
+   - 对话发生在"2023年7月6日" + "上周" → time: "大约2023年6月26日-30日"
+   - 对话发生在"2023年7月6日" + "两个月前" → time: "大约2023年5月"
+   - 对话发生在"2023年7月6日" + "我上大学的时候" → time: ""（过于模糊，无法推算）
 
 ## fact 字段信息密度要求（极其重要）
 每条 fact 必须达到"看到这一条就能回答相关问题"的完整程度：
@@ -298,6 +313,14 @@ PROPOSITION_EXTRACTION_PROMPT_ZH = """你是一个精确的知识点提取助手
 ## 会话内容
 {session_text}
 
+## 对话数据特别注意事项
+- 这是人与人之间的对话。对每个说话者提到的每件事都单独提取知识点。
+- 对话中提到的每一个具体细节（人名、地名、日期、计划、偏好、健康信息、关系）都必须单独提取。
+- 一个对话轮次可以产生 3-10+ 个知识点，不要将多个不同事实合并为一条。
+- 始终使用说话者的全名（如"Melanie"、"Caroline"），绝对不要用"她"、"他"、"他们"等代词。
+- fact 字段中必须包含主体姓名，确保 fact 自包含可理解（如"Melanie 去了..."而不是"去了..."）。
+- 对话中出现的问题，问题主题和回答内容都应分别提取为知识点。
+
 ## 输出
 以 JSON 数组形式输出所有知识点（通常一段对话应提取 20-60 条）：
 ```json
@@ -323,7 +346,18 @@ Each knowledge point MUST contain these four fields:
 - The time field must be the EVENT occurrence time, NOT the conversation timestamp.
 - Convert ALL relative time references (yesterday, last week, two days ago, that weekend, etc.) to absolute dates.
 - Use the conversation timestamp prefix to calculate absolute dates.
-- Leave as empty string when calculation is impossible.
+- Leave as empty string ONLY when there is absolutely NO time reference (explicit or implicit) in the sentence.
+- MANDATORY: If a sentence contains ANY relative time expression, the time field MUST NOT be empty.
+- When the exact date cannot be pinpointed but can be approximated, use "approximately [date]" (e.g., "approximately June 2023").
+
+### Time Inference Chain (follow these steps)
+1. Identify the conversation date from the timestamp prefix or context header.
+2. For each relative time reference, calculate: conversation_date + offset = event_date.
+3. Examples of resolution:
+   - Conversation on "July 6, 2023" + "yesterday" → time: "July 5, 2023"
+   - Conversation on "July 6, 2023" + "last week" → time: "approximately June 26-30, 2023"
+   - Conversation on "July 6, 2023" + "two months ago" → time: "approximately May 2023"
+   - Conversation on "July 6, 2023" + "when I was in college" → time: "" (too vague, cannot resolve)
 
 ## Fact Field Information Density Requirement (CRITICAL)
 Each fact must be complete enough that "reading this single fact alone can answer a question about it":
@@ -361,6 +395,14 @@ Each fact must be complete enough that "reading this single fact alone can answe
 
 ## Session Content
 {session_text}
+
+## Special Attention for Conversational Data
+- This is a conversation between people. Extract knowledge points for EVERY speaker separately.
+- Every specific detail mentioned (names, places, dates, plans, preferences, health info, relationships) must be extracted as a separate knowledge point.
+- A single conversation turn can yield 3-10+ knowledge points. Do NOT summarize multiple facts into one KP.
+- Always use the person's actual name (e.g., "Melanie", "Caroline"), NEVER use pronouns like "she", "he", "they".
+- Include the subject's name in the fact field so the fact is self-contained (e.g., "Melanie visited..." not just "visited...").
+- For questions asked in conversation, extract BOTH the question topic AND the answer as separate KPs.
 
 ## Output
 Output all knowledge points as a JSON array (typically 20-60 per conversation):

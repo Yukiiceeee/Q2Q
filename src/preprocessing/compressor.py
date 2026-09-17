@@ -1,4 +1,4 @@
-"""Token-level perplexity-based information density compression."""
+"""Sentence-level perplexity-based information density compression."""
 from __future__ import annotations
 
 import logging
@@ -10,6 +10,20 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+# Protected sentence patterns: dates, numbers, proper nouns, quotes
+_DATE_PATTERN = re.compile(
+    r'\b(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}|'
+    r'\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2}|'
+    r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}|'
+    r'\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|'
+    r'(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|'
+    r'(yesterday|today|tomorrow|last\s+(week|month|year)|next\s+(week|month|year)))',
+    re.IGNORECASE,
+)
+_NUMBER_PATTERN = re.compile(r'\d+')
+_QUOTE_PATTERN = re.compile(r'["“”‘’]')
+_PROPER_NOUN_PATTERN = re.compile(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b')
+
 
 class PerplexityCompressor:
 
@@ -17,14 +31,13 @@ class PerplexityCompressor:
         self,
         model_path: str,
         device: str = "cpu",
-        threshold: float = 5.0,
+        threshold: float = 3.0,
     ):
         self.device = device
         self.threshold = threshold
         self._model = None
         self._tokenizer = None
         self._model_path = model_path
-        self._number_pattern = re.compile(r'\d')
 
     def _load_model(self):
         if self._model is not None:
@@ -54,22 +67,27 @@ class PerplexityCompressor:
 
         kept_sentences = []
         for sentence in sentences:
-            compressed = self._compress_sentence(sentence)
-            if compressed.strip():
-                kept_sentences.append(compressed)
+            if self._should_keep(sentence):
+                kept_sentences.append(sentence)
 
         result = " ".join(kept_sentences)
         ratio = len(result) / max(len(session_text), 1)
         logger.info(
-            f"Compression: {len(session_text)} -> {len(result)} chars "
-            f"(ratio={ratio:.2f}, threshold={self.threshold})"
+            f"Sentence compression: {len(session_text)} -> {len(result)} chars "
+            f"(ratio={ratio:.2f}, kept {len(kept_sentences)}/{len(sentences)} sentences)"
         )
         return result
 
-    def _compress_sentence(self, sentence: str) -> str:
+    def _should_keep(self, sentence: str) -> bool:
+        if self._is_protected(sentence):
+            return True
+        avg_ppl = self._compute_sentence_perplexity(sentence)
+        return avg_ppl >= self.threshold
+
+    def _compute_sentence_perplexity(self, sentence: str) -> float:
         tokens = self._tokenizer.encode(sentence, return_tensors="pt").to(self.device)
         if tokens.shape[1] <= 2:
-            return sentence
+            return float("inf")
 
         with torch.no_grad():
             outputs = self._model(tokens, labels=tokens)
@@ -82,45 +100,20 @@ class PerplexityCompressor:
                 shift_labels.reshape(-1),
             )
 
-        token_perplexities = token_losses.cpu().numpy()
-        token_ids = tokens[0].cpu().tolist()
-        decoded_tokens = [
-            self._tokenizer.decode([tid], skip_special_tokens=False)
-            for tid in token_ids
-        ]
+        return float(token_losses.mean().item())
 
-        kept_tokens = [decoded_tokens[0]]
-        for i, (token_text, ppl) in enumerate(
-            zip(decoded_tokens[1:], token_perplexities), start=1
-        ):
-            if ppl >= self.threshold:
-                kept_tokens.append(token_text)
-            else:
-                if self._is_important_token(token_text):
-                    kept_tokens.append(token_text)
-
-        result = "".join(kept_tokens)
-        result = self._clean_compressed_text(result)
-        return result
-
-    def _is_important_token(self, token: str) -> bool:
-        stripped = token.strip()
-        if not stripped:
-            return False
-        if self._number_pattern.search(stripped):
+    def _is_protected(self, sentence: str) -> bool:
+        if _DATE_PATTERN.search(sentence):
             return True
-        structural = {".", ",", "!", "?", ":", ";", "\n", "。", "，", "！", "？", "：", "；"}
-        if stripped in structural:
+        if _QUOTE_PATTERN.search(sentence) and len(sentence) > 10:
             return True
-        if stripped[0].isupper() and len(stripped) > 1:
+        if _PROPER_NOUN_PATTERN.search(sentence):
+            return True
+        digit_count = len(_NUMBER_PATTERN.findall(sentence))
+        if digit_count >= 2:
             return True
         return False
 
     def _split_sentences(self, text: str) -> list[str]:
         sentences = re.split(r'(?<=[.!?。！？\n])\s*', text)
         return [s.strip() for s in sentences if s.strip()]
-
-    def _clean_compressed_text(self, text: str) -> str:
-        text = re.sub(r'\s{2,}', ' ', text)
-        text = text.strip()
-        return text
