@@ -22,9 +22,6 @@ python main.py memorize --file data/session.txt
 # 查询检索
 python main.py query "患者的血糖控制情况如何？"
 
-# 运行 MedMemoryBench 评测
-python main.py evaluate --max-sessions 10
-
 # 查看统计
 python main.py stats
 
@@ -41,10 +38,17 @@ python main.py clear
 | `DEFAULT_LLM_MODEL` | LLM 模型 | gpt-4o-mini |
 | `EMBEDDING_PROVIDER` | 嵌入模式 (local/openai) | local |
 | `DEFAULT_EMBEDDING_MODEL` | 嵌入模型路径 | - |
-| `STORAGE_BACKEND` | 存储后端 (chromadb/json) | chromadb |
-| `RETRIEVAL_ALPHA` | Q2Q 权重 α | 0.7 |
-| `NUM_FAKE_QUERIES` | 假想查询数量 | 5 |
-| `PROMPT_LANGUAGE` | 提示词语言 (zh/en) | zh |
+| `EMBEDDING_DEVICE` | 嵌入设备 | cpu |
+| `COMPRESSOR_MODEL` | 困惑度压缩模型路径 | - |
+| `PROPOSITION_MODE` | 命题提取模式 (llm/nlp) | llm |
+| `STORAGE_CHROMADB_PATH` | ChromaDB 持久化目录 | data/chromadb |
+| `FQ_STYLE` | 假查询表述样式 (formal/colloquial/keyword/elliptical) | formal |
+| `FQ_ROLE` | 假查询角色视角 (user/otherside) | user |
+| `LOG_LEVEL` | 日志级别 | INFO |
+
+> 场景路由（dialogue / trajectory / document）由 `src/preprocessing/scene_detector.py`
+> 在记忆构建时根据文本结构自动判定，无需配置。
+> 注意：双路检索中 Q2Q 与 Q2C 结果直接合并，不存在 α 加权。
 
 ## 项目结构
 
@@ -55,22 +59,17 @@ Q2Q/
 ├── src/
 │   ├── config.py            # 全局配置
 │   ├── schemas/             # 数据模型
-│   ├── prompts/             # 中英文提示词模板
+│   ├── prompts/             # 中英文提示词模板（含场景路由模板）
 │   ├── embedding/           # 嵌入计算 (本地/API)
-│   ├── memory/              # 记忆构建 (假想查询生成)
+│   ├── memory/              # 记忆构建 (假想查询生成 + DAG 图管理)
 │   ├── retrieval/           # 查询检索 (分解+双路检索)
-│   ├── storage/             # 存储层 (ChromaDB/JSON)
+│   ├── storage/             # 存储层 (ChromaDB)
 │   └── utils/               # LLM客户端/日志/分词器
-├── tests/
-│   ├── test_q2q.py          # 单元测试
-│   └── evaluate.py          # MedMemoryBench 评测脚本
+├── experiment/              # Motivation 分析实验（生成/嵌入/存储/实验执行）
+├── scripts/                 # 启动脚本
 ├── data/                    # 数据文件
 ├── logs/                    # 日志输出
 └── outputs/                 # 评测结果输出
 ```
 
-## 测试
-
-```bash
-python tests/test_q2q.py
-```
+> 评测流程由外部 harness（MedMemoryBench `scripts/run_eval.sh`）驱动，本仓库不再内置评测入口。

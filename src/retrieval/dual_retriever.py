@@ -27,6 +27,7 @@ class DualRetriever:
         top_k_q2c: int = 3,
         chain_depth: int = 3,
         prop_top_k_per_fq: int = 3,
+        max_fqs_per_session: int = 3,
     ):
         self.embedding_provider = embedding_provider
         self.memory_store = memory_store
@@ -36,6 +37,7 @@ class DualRetriever:
         self.top_k_q2c = top_k_q2c
         self.chain_depth = chain_depth
         self.prop_top_k_per_fq = prop_top_k_per_fq
+        self.max_fqs_per_session = max_fqs_per_session
 
     async def retrieve(self, sub_queries: list[SubQuery]) -> RetrievalResult:
         valid_sqs = [sq for sq in sub_queries if sq.embedding is not None]
@@ -59,14 +61,37 @@ class DualRetriever:
         for fq in q2q_result["direct_fqs"]:
             if fq.session_id and fq.session_id not in direct_session_ids:
                 direct_session_ids.add(fq.session_id)
-                entry = await self.memory_store.get_by_id(fq.session_id)
-                if entry and entry.pre_session_text:
-                    direct_session_texts.append(entry.pre_session_text)
-                elif entry and entry.session_text:
-                    direct_session_texts.append(entry.session_text[:8000])
+                text = await self._get_session_text(fq.session_id)
+                if text:
+                    direct_session_texts.append(text)
 
-        # === Q2C → propositions from matched sessions (excluding direct hits) ===
-        q2c_props = await self._fetch_q2c_propositions(q2c_result, direct_session_ids, valid_sqs)
+        # === DAG chain → session texts not already covered by direct hits ===
+        chain_session_texts: list[str] = []
+        chain_session_ids: set[str] = set()
+        for fq in q2q_result["chain_fqs"]:
+            sid = fq.session_id
+            if not sid or sid in direct_session_ids or sid in chain_session_ids:
+                continue
+            chain_session_ids.add(sid)
+            text = await self._get_session_text(sid)
+            if text:
+                chain_session_texts.append(text)
+
+        # === Q2C → propositions from matched sessions ===
+        q2c_props = await self._fetch_q2c_propositions(q2c_result, valid_sqs)
+
+        # === Q2C → session texts for chunks neither Q2Q nor the chain reached ===
+        covered = direct_session_ids | chain_session_ids
+        q2c_session_texts: list[str] = []
+        seen_q2c: set[str] = set()
+        for hit in q2c_result:
+            sid = hit.get("session_id", "")
+            if not sid or sid in covered or sid in seen_q2c:
+                continue
+            seen_q2c.add(sid)
+            text = await self._get_session_text(sid)
+            if text:
+                q2c_session_texts.append(text)
 
         # === Merge chain_props + q2c_props for backward compat (ranked_propositions) ===
         merged_props = self._merge_propositions(chain_props, q2c_props)
@@ -84,17 +109,34 @@ class DualRetriever:
             direct_session_texts=direct_session_texts,
             chain_propositions=chain_props,
             q2c_propositions=q2c_props,
+            q2c_session_texts=q2c_session_texts,
+            chain_session_texts=chain_session_texts,
         )
 
         logger.info(
             f"Retrieval done: {len(result.matched_fqs)} direct FQs → "
             f"{len(direct_session_texts)} session texts, "
             f"{len(result.chain_fqs)} chain FQs → "
-            f"{len(chain_props)} chain props, "
-            f"{len(q2c_props)} Q2C props, "
+            f"{len(chain_session_texts)} chain texts / {len(chain_props)} chain props, "
+            f"{len(q2c_session_texts)} Q2C texts / {len(q2c_props)} Q2C props, "
             f"{len(merged_props)} merged (ranked) props total"
         )
         return result
+
+    async def _get_session_text(self, session_id: str) -> str:
+        entry = await self.memory_store.get_by_id(session_id)
+        if not entry:
+            return ""
+        text = entry.pre_session_text or entry.session_text or ""
+        if not text:
+            return ""
+        # Compression protects date-bearing sentences, but the session header is
+        # not guaranteed to survive sentence selection. Re-stating it costs a
+        # handful of tokens and keeps "when was this recorded" answerable.
+        date = entry.metadata.get("session_date", "")
+        if date and date not in text[:200]:
+            text = f"[Recorded: {date}]\n{text}"
+        return text
 
     async def _q2q_retrieve(self, sub_queries: list[SubQuery]) -> dict:
         all_embeddings = [sq.embedding for sq in sub_queries]
@@ -114,19 +156,51 @@ class DualRetriever:
                     fq_data_map[qid] = hit
 
         sorted_fqs = sorted(fq_score_map.items(), key=lambda x: x[1], reverse=True)
-        top_fq_ids = [qid for qid, _ in sorted_fqs[:self.top_n]]
-        top_fq_data = [fq_data_map[qid] for qid in top_fq_ids]
 
-        # Bidirectional chain expansion
+        # Session-level aggregation: top_n bounds the number of distinct SESSIONS,
+        # not raw FQ count. Several near-duplicate FQs from one session would
+        # otherwise consume the whole budget and leave other sessions unread.
+        #
+        # That per-session cap only means something while there are other sessions
+        # to protect. When the candidate pool spans fewer distinct sessions than
+        # top_n -- which happens whenever a whole document is stored as one
+        # session, as full-trajectory injection does -- the cap has nothing to
+        # protect and degrades into plain truncation, discarding candidates no
+        # other session could have supplied. A pool with the usual many sessions
+        # is unaffected, since spreading the budget over min(pool, top_n)
+        # recipients returns the configured cap exactly.
+        pool_sessions = {fq_data_map[qid].get("session_id", "") for qid, _ in sorted_fqs}
+        recipients = max(min(len(pool_sessions), self.top_n), 1)
+        budget = self.top_n * self.max_fqs_per_session
+        per_session_cap = max(self.max_fqs_per_session, -(-budget // recipients))
+
+        direct_fq_ids: list[str] = []
+        per_session_count: dict[str, int] = {}
+        for qid, _score in sorted_fqs:
+            sid = fq_data_map[qid].get("session_id", "")
+            if sid not in per_session_count:
+                if len(per_session_count) >= self.top_n:
+                    continue
+                per_session_count[sid] = 0
+            if per_session_count[sid] >= per_session_cap:
+                continue
+            per_session_count[sid] += 1
+            direct_fq_ids.append(qid)
+
+        top_fq_data = [fq_data_map[qid] for qid in direct_fq_ids]
+
+        # Chain seeds stay capped at top_n highest-scoring FQs so that widening
+        # the direct set does not blow up DAG expansion breadth.
+        chain_seed_ids = direct_fq_ids[:self.top_n]
         chain_nodes = await self.graph_manager.get_chain_context(
-            top_fq_ids, depth=self.chain_depth
+            chain_seed_ids, depth=self.chain_depth
         )
 
-        direct_fq_ids = set(top_fq_ids)
-        chain_fq_data = [n for n in chain_nodes if n["query_id"] not in direct_fq_ids]
+        direct_fq_id_set = set(direct_fq_ids)
+        chain_fq_data = [n for n in chain_nodes if n["query_id"] not in direct_fq_id_set]
 
         # Deduplicate
-        seen = set(top_fq_ids)
+        seen = set(direct_fq_ids)
         deduped_chain = []
         for node in chain_fq_data:
             if node["query_id"] not in seen:
@@ -141,7 +215,7 @@ class DualRetriever:
             "direct_fqs": direct_fqs,
             "chain_fqs": chain_fqs,
             "all_fqs": direct_fqs + chain_fqs,
-            "scores": dict(sorted_fqs[:self.top_n]),
+            "scores": {qid: fq_score_map[qid] for qid in direct_fq_ids},
         }
 
     async def _q2c_retrieve(self, sub_queries: list[SubQuery]) -> list[dict]:
@@ -215,15 +289,18 @@ class DualRetriever:
         return ranked[:max_props]
 
     async def _fetch_q2c_propositions(
-        self, q2c_result: list[dict], exclude_session_ids: set[str], sub_queries: list[SubQuery]
+        self, q2c_result: list[dict], sub_queries: list[SubQuery]
     ) -> list[Proposition]:
         if not q2c_result:
             return []
 
-        target_sids = [
-            hit["session_id"] for hit in q2c_result
-            if hit["session_id"] not in exclude_session_ids
-        ][:self.top_k_q2c]
+        # Sessions already covered by the direct path are skipped in the Q2C
+        # *text* tier, so the same raw passage is never duplicated. Their
+        # propositions are a different granularity — distilled anchors the raw
+        # text does not surface on its own — so they must not be skipped here.
+        # Excluding them left the proposition tier empty precisely when Q2Q and
+        # Q2C agreed on the session, i.e. when retrieval was working best.
+        target_sids = [hit["session_id"] for hit in q2c_result][:self.top_k_q2c]
 
         if not target_sids:
             return []
@@ -289,6 +366,5 @@ class DualRetriever:
             time=data.get("time", ""),
             parent_ids=data.get("parent_ids", []),
             child_ids=data.get("child_ids", []),
-            depth=data.get("depth", 0),
             created_at=data.get("created_at", ""),
         )

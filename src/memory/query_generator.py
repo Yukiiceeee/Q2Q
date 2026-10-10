@@ -9,6 +9,7 @@ import numpy as np
 
 from src.schemas.models import FakeQuery, Proposition
 from src.embedding.base import BaseEmbeddingProvider
+from src.preprocessing.scene_detector import detect_scene
 from src.utils.llm_client import BaseLLMClient, format_messages
 from src.prompts.fake_query_gen import build_fake_query_gen_prompt
 
@@ -53,6 +54,7 @@ class FakeQueryGenerator:
         num_queries: int = 15,
         language: str = "zh",
         binding_verify_threshold: float = 0.8,
+        max_extra_bindings: int = 3,
         style: str = "formal",
         role: str = "user",
     ):
@@ -61,6 +63,7 @@ class FakeQueryGenerator:
         self.num_queries = num_queries
         self.language = language
         self.binding_verify_threshold = binding_verify_threshold
+        self.max_extra_bindings = max_extra_bindings
         self.style = style
         self.role = role
 
@@ -69,15 +72,18 @@ class FakeQueryGenerator:
         propositions: list[Proposition],
         session_text: str,
         session_id: str = "",
+        scene: str = "",
     ) -> list[FakeQuery]:
         if not propositions:
             logger.warning("No propositions provided, skipping FQ generation")
             return []
 
+        scene = scene or detect_scene(session_text)
+
         dynamic_num = max(self.num_queries, min(len(propositions) * 2, 40))
         logger.info(
             f"FQ generation: {len(propositions)} props → target {dynamic_num} queries "
-            f"(config={self.num_queries})"
+            f"(config={self.num_queries}, scene={scene})"
         )
 
         props_text = self._format_propositions(propositions)
@@ -89,9 +95,11 @@ class FakeQueryGenerator:
             self.language,
             style=self.style,
             role=self.role,
+            scene=scene,
         )
         messages = format_messages(user_message=prompt)
-        response = await self.llm_client.chat(messages, temperature=0.7)
+        # Large max_tokens: up to 40 queries per response must not be truncated
+        response = await self.llm_client.chat(messages, temperature=0.7, max_tokens=8000)
 
         raw_fqs = self._parse_response(response.content)
 
@@ -105,7 +113,9 @@ class FakeQueryGenerator:
             fallback_prompt = self._build_fallback_prompt(props_text, dynamic_num)
             fallback_messages = format_messages(user_message=fallback_prompt)
             try:
-                fallback_response = await self.llm_client.chat(fallback_messages, temperature=0.5)
+                fallback_response = await self.llm_client.chat(
+                    fallback_messages, temperature=0.5, max_tokens=8000
+                )
                 raw_fqs = self._parse_response(fallback_response.content)
                 if raw_fqs:
                     logger.info(f"[FQ] Fallback prompt succeeded: {len(raw_fqs)} queries parsed")
@@ -206,6 +216,11 @@ class FakeQueryGenerator:
         added_count = 0
         for i, fq in enumerate(fake_queries):
             existing_sources = set(fq.answer_source)
+            # Keep only the strongest extra bindings. Without a cap a generic FQ
+            # clears the threshold against most propositions of the session and
+            # drags all of them into the answer context, which costs tokens and
+            # dilutes the evidence the LLM has to reason over.
+            candidates = []
             for j, prop in enumerate(propositions):
                 if prop.prop_id in existing_sources:
                     continue
@@ -213,8 +228,12 @@ class FakeQueryGenerator:
                     fq_embeddings[i], prop_embeddings[j]
                 )
                 if sim >= self.binding_verify_threshold:
-                    fq.answer_source.append(prop.prop_id)
-                    added_count += 1
+                    candidates.append((sim, prop.prop_id))
+
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            for _, prop_id in candidates[: self.max_extra_bindings]:
+                fq.answer_source.append(prop_id)
+                added_count += 1
 
         if added_count > 0:
             logger.info(f"Binding verification added {added_count} new links")
@@ -326,33 +345,26 @@ class FakeQueryGenerator:
         return None
 
     def _try_fix_truncated_json(self, content: str) -> list[dict] | None:
-        # Try to find the start of a JSON structure and fix truncation
-        for start_pattern in [r'"queries"\s*:\s*\[', r'^\s*\[']:
+        # Locate array start ("queries": [ wrapper first, then any bare [)
+        for start_pattern in [r'"queries"\s*:\s*\[', r'\[']:
             match = re.search(start_pattern, content)
             if not match:
                 continue
 
-            # Extract from the array start
-            if '"queries"' in match.group(0):
-                arr_start = content.find('[', match.start())
-            else:
-                arr_start = match.start()
-
+            arr_start = content.find('[', match.start())
             if arr_start < 0:
                 continue
 
             fragment = content[arr_start:]
 
-            # Find the last complete object (ends with })
-            last_brace = fragment.rfind('}')
-            if last_brace < 0:
-                continue
-
-            # Take everything up to the last complete object, close the array
-            candidate = fragment[:last_brace + 1] + ']'
-            parsed = self._try_legacy_array(candidate)
-            if parsed:
-                logger.info(f"[FQ] Recovered {len(parsed)} queries from truncated JSON")
-                return parsed
+            # Try closing the array at each of the last few complete objects:
+            # the very last '}' may sit inside a truncated element, so walk back
+            positions = [m.start() for m in re.finditer(r'\}', fragment)]
+            for pos in reversed(positions[-8:]):
+                candidate = fragment[:pos + 1] + ']'
+                parsed = self._try_legacy_array(candidate)
+                if parsed:
+                    logger.info(f"[FQ] Recovered {len(parsed)} queries from truncated JSON")
+                    return parsed
 
         return None

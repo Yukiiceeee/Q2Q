@@ -21,8 +21,6 @@ class EmbeddingConfig:
     provider: str = "local"
     model_name: str = ""
     device: str = "cpu"
-    dimension: int = 512
-    max_seq_length: int = 512
 
 
 @dataclass
@@ -31,7 +29,6 @@ class PreprocessingConfig:
     compressor_device: str = "cpu"
     perplexity_threshold: float = 3.0
     proposition_mode: str = "llm"
-    nlp_rule_model: str = "en_core_web_sm"
     nlp_inference_model: str = ""
 
 
@@ -40,11 +37,15 @@ class GraphConfig:
     evolve_threshold: float = 0.6
     diverge_low: float = 0.2
     diverge_high: float = 0.6
+    # Embedding-similarity fallback for edge creation, used when proposition
+    # overlap is too sparse to link two FQs on the same thread.
+    link_similarity: float = 0.82
     max_parents: int = 3
     maintenance_interval: int = 10
     merge_overlap_threshold: float = 0.9
     max_chain_length: int = 6
     chain_sample_interval: int = 2
+    max_chain_nodes: int = 60
     similarity_top_k: int = 5
 
 
@@ -57,7 +58,9 @@ class RetrievalConfig:
     max_context_tokens: int = 10000
     chain_depth: int = 3
     prop_top_k_per_fq: int = 3
+    max_fqs_per_session: int = 3
     binding_verify_threshold: float = 0.8
+    max_extra_bindings: int = 3  # cap on embedding-added links per fake query
     fq_style: str = "formal"    # formal | colloquial | keyword | elliptical
     fq_role: str = "user"       # user | otherside
 
@@ -65,7 +68,6 @@ class RetrievalConfig:
 @dataclass
 class StorageConfig:
     backend: str = "chromadb"
-    json_path: str = "data/memories.json"
     chromadb_path: str = "data/chromadb"
     chromadb_collection: str = "q2q_memories"
 
@@ -120,7 +122,6 @@ class Q2QConfig:
 
         config.storage.chromadb_path = os.getenv("STORAGE_CHROMADB_PATH", "data/chromadb")
         config.storage.chromadb_collection = os.getenv("STORAGE_CHROMADB_COLLECTION", "q2q_memories")
-        config.storage.json_path = os.getenv("STORAGE_JSON_PATH", "data/memories.json")
 
         config.retrieval.fq_style = os.getenv("FQ_STYLE", "formal")
         config.retrieval.fq_role = os.getenv("FQ_ROLE", "user")

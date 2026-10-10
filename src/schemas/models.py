@@ -7,12 +7,6 @@ import uuid
 import numpy as np
 
 
-class PropositionSource(Enum):
-    RULE = "rule"
-    MODEL = "model"
-    LLM = "llm"
-
-
 @dataclass
 class Proposition:
     prop_id: str = field(default_factory=lambda: f"P_{uuid.uuid4().hex[:8]}")
@@ -21,8 +15,11 @@ class Proposition:
     session_id: str = ""
     # structured fields (optional, populated by rule-based extraction)
     time: str = ""
+    # Date the source session was recorded. Distinct from `time`, which is when
+    # the event itself happened: a session dated 2024-01-15 can describe an event
+    # from "about two months ago". Queries ask about both, so both are kept.
+    record_date: str = ""
     subject: str = ""
-    predicate: str = ""
     object_value: str = ""
     entities: list[str] = field(default_factory=list)
     # embedding
@@ -35,8 +32,8 @@ class Proposition:
             "source": self.source,
             "session_id": self.session_id,
             "time": self.time,
+            "record_date": self.record_date,
             "subject": self.subject,
-            "predicate": self.predicate,
             "object_value": self.object_value,
             "entities": self.entities,
             "embedding": self.embedding.tolist() if self.embedding is not None else None,
@@ -51,8 +48,8 @@ class Proposition:
             source=data.get("source", "llm"),
             session_id=data.get("session_id", ""),
             time=data.get("time", ""),
+            record_date=data.get("record_date", ""),
             subject=data.get("subject", ""),
-            predicate=data.get("predicate", ""),
             object_value=data.get("object_value", ""),
             entities=data.get("entities", []),
             embedding=emb,
@@ -68,11 +65,8 @@ class FakeQuery:
     session_id: str = ""
     time: str = ""
     # DAG node extended attributes
-    last_accessed: str = ""
-    access_count: int = 0
     parent_ids: list[str] = field(default_factory=list)
     child_ids: list[str] = field(default_factory=list)
-    depth: int = 0
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> dict:
@@ -83,11 +77,8 @@ class FakeQuery:
             "embedding": self.embedding.tolist() if self.embedding is not None else None,
             "session_id": self.session_id,
             "time": self.time,
-            "last_accessed": self.last_accessed,
-            "access_count": self.access_count,
             "parent_ids": self.parent_ids,
             "child_ids": self.child_ids,
-            "depth": self.depth,
             "created_at": self.created_at,
         }
 
@@ -101,11 +92,8 @@ class FakeQuery:
             embedding=emb,
             session_id=data.get("session_id", ""),
             time=data.get("time", ""),
-            last_accessed=data.get("last_accessed", ""),
-            access_count=data.get("access_count", 0),
             parent_ids=data.get("parent_ids", []),
             child_ids=data.get("child_ids", []),
-            depth=data.get("depth", 0),
             created_at=data.get("created_at", ""),
         )
 
@@ -208,11 +196,7 @@ class RetrievalResult:
     chain_propositions: list[Proposition] = field(default_factory=list)
     # Q2C path: propositions from content-matched sessions
     q2c_propositions: list[Proposition] = field(default_factory=list)
-
-
-@dataclass
-class RetrievalResponse:
-    raw_query: str = ""
-    sub_queries: list[SubQuery] = field(default_factory=list)
-    result: Optional[RetrievalResult] = None
-    answer: str = ""
+    # Q2C path: full session texts from content-matched sessions (Q2Q hits excluded)
+    q2c_session_texts: list[str] = field(default_factory=list)
+    # DAG chain: full session texts reached via chain expansion (direct hits excluded)
+    chain_session_texts: list[str] = field(default_factory=list)

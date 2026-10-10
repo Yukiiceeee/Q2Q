@@ -20,8 +20,6 @@ def apply_cli_overrides(config: Q2QConfig, args: argparse.Namespace) -> Q2QConfi
         config.storage.backend = args.storage
     if args.language:
         config.language = args.language
-    if args.alpha is not None:
-        config.retrieval.alpha = args.alpha
     if args.top_k is not None:
         config.retrieval.top_k_per_sub = args.top_k
     if args.top_n is not None:
@@ -45,8 +43,7 @@ async def cmd_interactive(agent: Q2QAgent, args: argparse.Namespace) -> None:
     print("  /clear     - Clear all memories")
     print("  /quit      - Exit")
     print()
-    print(f"Config: alpha={agent.config.retrieval.alpha}, "
-          f"top_k={agent.config.retrieval.top_k_per_sub}, "
+    print(f"Config: top_k={agent.config.retrieval.top_k_per_sub}, "
           f"top_n={agent.config.retrieval.top_n}, "
           f"num_fq={agent.config.retrieval.num_fake_queries}")
     print(f"Storage: {agent.config.storage.backend} | "
@@ -197,7 +194,6 @@ async def async_main() -> None:
     parser.add_argument("--log-level", type=str, default=None)
     parser.add_argument("--storage", type=str, default=None)
     parser.add_argument("--language", type=str, default=None)
-    parser.add_argument("--alpha", type=float, default=None)
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--top-n", type=int, default=None)
     parser.add_argument("--num-fake-queries", type=int, default=None)

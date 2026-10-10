@@ -8,6 +8,12 @@ import uuid
 from typing import Optional
 
 from src.schemas.models import Proposition
+from src.preprocessing.scene_detector import (
+    SCENE_DIALOGUE,
+    SCENE_TRAJECTORY,
+    detect_scene,
+)
+from src.prompts.scene_prompts import get_extraction_prompt
 from src.utils.llm_client import BaseLLMClient, format_messages
 
 logger = logging.getLogger(__name__)
@@ -36,11 +42,17 @@ class PropositionExtractor:
                     model_path=nlp_inference_model_path, device=device
                 )
 
-    async def extract(self, session_text: str, session_id: str = "", session_date: str = "") -> list[Proposition]:
+    async def extract(
+        self,
+        session_text: str,
+        session_id: str = "",
+        session_date: str = "",
+        scene: str = "",
+    ) -> list[Proposition]:
         if self.mode == "nlp":
             return self._extract_nlp(session_text, session_id)
-        else:
-            return await self._extract_llm(session_text, session_id, session_date)
+        scene = scene or detect_scene(session_text)
+        return await self._extract_llm(session_text, session_id, session_date, scene)
 
     def _extract_nlp(self, session_text: str, session_id: str) -> list[Proposition]:
         rule_props = self._rule_extractor.extract(session_text, session_id)
@@ -55,8 +67,14 @@ class PropositionExtractor:
         logger.info(f"Merged propositions: {len(merged)}")
         return merged
 
-    async def _extract_llm(self, session_text: str, session_id: str, session_date: str = "") -> list[Proposition]:
-        prompt = self._build_extraction_prompt(session_text, session_date)
+    async def _extract_llm(
+        self,
+        session_text: str,
+        session_id: str,
+        session_date: str = "",
+        scene: str = SCENE_DIALOGUE,
+    ) -> list[Proposition]:
+        prompt = self._build_extraction_prompt(session_text, session_date, scene)
         messages = format_messages(user_message=prompt)
         response = await self.llm_client.chat(messages, temperature=0.3)
         raw_props = self._parse_llm_response(response.content)
@@ -86,25 +104,39 @@ class PropositionExtractor:
                 session_id=session_id,
                 time=time_val,
                 subject=subject,
-                predicate="",
                 object_value=fact,
                 entities=entities_or_values,
             )
             propositions.append(prop)
 
-        logger.info(f"LLM extraction: {len(propositions)} propositions (structured KP format)")
+        logger.info(f"LLM extraction: {len(propositions)} propositions (scene={scene})")
         return propositions
 
-    def _build_extraction_prompt(self, session_text: str, session_date: str = "") -> str:
-        if self.language == "zh":
-            template = PROPOSITION_EXTRACTION_PROMPT_ZH
-        else:
-            template = PROPOSITION_EXTRACTION_PROMPT_EN
+    def _build_extraction_prompt(
+        self, session_text: str, session_date: str = "", scene: str = SCENE_DIALOGUE
+    ) -> str:
+        # Scene-specific template when one exists; otherwise the dialogue default.
+        template = get_extraction_prompt(scene, self.language)
+        if template is None:
+            template = (
+                PROPOSITION_EXTRACTION_PROMPT_ZH
+                if self.language == "zh"
+                else PROPOSITION_EXTRACTION_PROMPT_EN
+            )
 
-        if session_date:
-            date_context = f"\n\n## Conversation Date Context\nThis conversation took place on: **{session_date}**\nUse this date as the anchor to resolve all relative time references (e.g., 'yesterday' = one day before {session_date}, 'last week' = the week before {session_date}, 'two months ago' = approximately two months before {session_date}).\n"
-            return template.format(session_text=session_text) + date_context
-        return template.format(session_text=session_text)
+        prompt = template.format(session_text=session_text)
+
+        # A trajectory is anchored by step ordinals, not wall-clock dates, so the
+        # date-resolution block would only add tokens without changing behaviour.
+        if session_date and scene != SCENE_TRAJECTORY:
+            prompt += (
+                f"\n\n## Conversation Date Context\nThis conversation took place on: "
+                f"**{session_date}**\nUse this date as the anchor to resolve all relative time "
+                f"references (e.g., 'yesterday' = one day before {session_date}, 'last week' = "
+                f"the week before {session_date}, 'two months ago' = approximately two months "
+                f"before {session_date}).\n"
+            )
+        return prompt
 
     def _parse_llm_response(self, content: str) -> list[dict]:
         content = content.strip()

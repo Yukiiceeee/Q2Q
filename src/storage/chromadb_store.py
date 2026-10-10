@@ -76,8 +76,6 @@ class ChromaDBStore(BaseMemoryStore):
                         "time": _s(fq.time),
                         "parent_ids": ",".join(fq.parent_ids or []),
                         "child_ids": ",".join(fq.child_ids or []),
-                        "depth": fq.depth or 0,
-                        "access_count": fq.access_count or 0,
                         "created_at": _s(fq.created_at),
                     }],
                     documents=[_s(fq.text)],
@@ -109,16 +107,38 @@ class ChromaDBStore(BaseMemoryStore):
                 documents=[entry.pre_session_text[:500] if entry.pre_session_text else ""],
             )
 
-        props_json = json.dumps([p.to_dict() for p in entry.propositions], ensure_ascii=False)
-        fqs_json = json.dumps([fq.to_dict() for fq in entry.fake_queries], ensure_ascii=False)
+        # Serialize WITHOUT embeddings (embeddings live in dedicated collections).
+        # Cap by dropping whole items so the stored string is always valid JSON.
+        def _json_capped(items: list[dict], cap: int) -> str:
+            s = json.dumps(items, ensure_ascii=False)
+            while len(s) > cap and items:
+                items = items[:-1]
+                s = json.dumps(items, ensure_ascii=False)
+            return s
+
+        props_json = _json_capped(
+            [{k: v for k, v in p.to_dict().items() if k != "embedding"}
+             for p in entry.propositions],
+            120000,
+        )
+        fqs_json = _json_capped(
+            [{k: v for k, v in fq.to_dict().items() if k != "embedding"}
+             for fq in entry.fake_queries],
+            120000,
+        )
 
         meta_dict = {
             "session_id": _s(entry.session_id),
-            "session_text": _s(entry.session_text)[:10000],
-            "pre_session_text": _s(entry.pre_session_text)[:10000],
-            "propositions_json": props_json[:40000],
-            "fake_queries_json": fqs_json[:40000],
+            "session_text": _s(entry.session_text)[:60000],
+            "pre_session_text": _s(entry.pre_session_text)[:60000],
+            "propositions_json": props_json,
+            "fake_queries_json": fqs_json,
             "created_at": _s(entry.created_at),
+            # Build-time facts the retrieval side needs back. Chroma metadata is
+            # flat scalars only, so the two consumed keys are stored by name
+            # rather than the whole `entry.metadata` dict.
+            "session_date": _s(entry.metadata.get("session_date", "")),
+            "scene": _s(entry.metadata.get("scene", "")),
         }
         self._meta_collection.upsert(
             ids=[entry.session_id],
@@ -173,6 +193,9 @@ class ChromaDBStore(BaseMemoryStore):
             pre_session_text=meta.get("pre_session_text", ""),
             created_at=meta.get("created_at", ""),
         )
+        for key in ("session_date", "scene"):
+            if meta.get(key):
+                entry.metadata[key] = meta[key]
         props_json = meta.get("propositions_json", "")
         if props_json:
             try:
@@ -285,7 +308,6 @@ class ChromaDBStore(BaseMemoryStore):
             "answer_source": [s for s in answer_source_str.split(",") if s],
             "parent_ids": [p for p in parent_ids_str.split(",") if p],
             "child_ids": [c for c in child_ids_str.split(",") if c],
-            "depth": meta.get("depth", 0),
             "time": meta.get("time", ""),
             "created_at": meta.get("created_at", ""),
         }
@@ -345,66 +367,31 @@ class ChromaDBStore(BaseMemoryStore):
                 return []
         return await asyncio.to_thread(_get)
 
-    async def search_propositions(
-        self, query_embedding: np.ndarray, session_id: str, top_k: int = 5
-    ) -> list[dict]:
-        def _search():
-            count = self._prop_collection.count()
-            if count == 0:
-                return []
+    async def get_proposition_embeddings(
+        self, prop_ids: list[str], session_id: str
+    ) -> dict[str, np.ndarray]:
+        def _get():
+            if not prop_ids:
+                return {}
+            full_ids = [f"{session_id}_{pid}" for pid in prop_ids]
             try:
-                results = self._prop_collection.query(
-                    query_embeddings=[query_embedding.tolist()],
-                    n_results=min(top_k * 3, count),
-                    where={"session_id": session_id},
-                    include=["metadatas", "distances", "documents"],
+                results = self._prop_collection.get(
+                    ids=full_ids, include=["embeddings", "metadatas"]
                 )
-                if not results["ids"] or not results["ids"][0]:
-                    return []
-                hits = []
-                for i, pid in enumerate(results["ids"][0]):
-                    distance = results["distances"][0][i]
-                    score = max(1.0 - distance, 0.0)
-                    meta = results["metadatas"][0][i]
-                    hits.append({
-                        "prop_id": meta.get("prop_id", ""),
-                        "text": meta.get("text", ""),
-                        "score": score,
-                        "session_id": meta.get("session_id", ""),
-                    })
-                return hits[:top_k]
+                if results["ids"] is None or len(results["ids"]) == 0:
+                    return {}
+                emb_map = {}
+                for i in range(len(results["ids"])):
+                    meta = results["metadatas"][i]
+                    emb = results["embeddings"][i]
+                    if emb is not None:
+                        emb_map[meta.get("prop_id", "")] = np.asarray(emb, dtype=np.float32)
+                return emb_map
             except Exception:
-                return []
-        return await asyncio.to_thread(_search)
+                return {}
+        return await asyncio.to_thread(_get)
 
     # ==================== Content search ====================
-
-    async def search_content(
-        self, query_embedding: np.ndarray, top_k: int = 10
-    ) -> list[dict]:
-        def _search():
-            count = self._content_collection.count()
-            if count == 0:
-                return []
-            results = self._content_collection.query(
-                query_embeddings=[query_embedding.tolist()],
-                n_results=min(top_k, count),
-                include=["metadatas", "distances"],
-            )
-            if not results["ids"] or not results["ids"][0]:
-                return []
-            hits = []
-            for i, cid in enumerate(results["ids"][0]):
-                distance = results["distances"][0][i]
-                score = max(1.0 - distance, 0.0)
-                meta = results["metadatas"][0][i]
-                hits.append({
-                    "session_id": meta.get("session_id", ""),
-                    "score": score,
-                    "chunk_index": meta.get("chunk_index", 0),
-                })
-            return hits
-        return await asyncio.to_thread(_search)
 
     async def batch_search_content(
         self, query_embeddings: list[np.ndarray], top_k: int = 10
@@ -452,34 +439,6 @@ class ChromaDBStore(BaseMemoryStore):
                 )
         await asyncio.to_thread(_save)
 
-    async def get_edges_from(self, src_id: str) -> list[Edge]:
-        def _get():
-            try:
-                results = self._edges_collection.get(
-                    where={"src_id": src_id}, include=["metadatas"]
-                )
-                if not results["ids"]:
-                    return []
-                return [self._parse_edge(results["ids"][i], results["metadatas"][i])
-                        for i in range(len(results["ids"]))]
-            except Exception:
-                return []
-        return await asyncio.to_thread(_get)
-
-    async def get_edges_to(self, dst_id: str) -> list[Edge]:
-        def _get():
-            try:
-                results = self._edges_collection.get(
-                    where={"dst_id": dst_id}, include=["metadatas"]
-                )
-                if not results["ids"]:
-                    return []
-                return [self._parse_edge(results["ids"][i], results["metadatas"][i])
-                        for i in range(len(results["ids"]))]
-            except Exception:
-                return []
-        return await asyncio.to_thread(_get)
-
     async def get_all_edges(self) -> list[Edge]:
         def _get():
             results = self._edges_collection.get(include=["metadatas"])
@@ -511,8 +470,65 @@ class ChromaDBStore(BaseMemoryStore):
                 self._fq_collection.delete(ids=[query_id])
             except Exception:
                 pass
+        # Collect neighbours *before* the edge rows disappear, so their
+        # parent_ids/child_ids can be reconciled — otherwise the DAG keeps
+        # dangling ids and get_chain_context's BFS enqueues dead nodes.
+        neighbours = await self._collect_neighbours(query_id)
         await asyncio.to_thread(_delete)
         await self.delete_edges_involving(query_id)
+        await self._detach_neighbours(query_id, neighbours)
+
+    async def _collect_neighbours(self, query_id: str) -> tuple[set[str], set[str]]:
+        parents: set[str] = set()
+        children: set[str] = set()
+
+        def _collect():
+            try:
+                r1 = self._edges_collection.get(where={"dst_id": query_id})
+                parents.update((m or {}).get("src_id", "") for m in (r1.get("metadatas") or []))
+            except Exception:
+                pass
+            try:
+                r2 = self._edges_collection.get(where={"src_id": query_id})
+                children.update((m or {}).get("dst_id", "") for m in (r2.get("metadatas") or []))
+            except Exception:
+                pass
+
+        await asyncio.to_thread(_collect)
+        return {n for n in parents if n}, {n for n in children if n}
+
+    async def _detach_neighbours(self, query_id: str, neighbours: tuple[set[str], set[str]]) -> None:
+        parents, children = neighbours
+        if not parents and not children:
+            return
+
+        def _detach():
+            for node_id in parents:
+                meta = self._fetch_meta(node_id)
+                if meta is None:
+                    continue
+                ids = [i for i in self._split_list(meta.get("child_ids", "")) if i != query_id]
+                if len(ids) != len(self._split_list(meta.get("child_ids", ""))):
+                    self._fq_collection.update(ids=[node_id], metadatas=[{**meta, "child_ids": ",".join(ids)}])
+            for node_id in children:
+                meta = self._fetch_meta(node_id)
+                if meta is None:
+                    continue
+                ids = [i for i in self._split_list(meta.get("parent_ids", "")) if i != query_id]
+                if len(ids) != len(self._split_list(meta.get("parent_ids", ""))):
+                    self._fq_collection.update(ids=[node_id], metadatas=[{**meta, "parent_ids": ",".join(ids)}])
+
+        await asyncio.to_thread(_detach)
+
+    def _fetch_meta(self, query_id: str) -> dict | None:
+        r = self._fq_collection.get(ids=[query_id], include=["metadatas"])
+        return r["metadatas"][0] if r["ids"] else None
+
+    @staticmethod
+    def _split_list(value) -> list[str]:
+        if isinstance(value, list):
+            return [v for v in value if v]
+        return [v for v in str(value).split(",") if v]
 
     def _parse_edge(self, edge_id: str, meta: dict) -> Edge:
         return Edge(

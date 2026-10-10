@@ -10,13 +10,28 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Credential-bearing keys are stripped from the config snapshot so that a run
+# never persists an API key or an internal endpoint into the result log.
+_REDACTED_KEYS = {"api_key", "base_url", "token", "secret", "password"}
+
+
+def _redact(obj):
+    if isinstance(obj, dict):
+        return {
+            k: ("***" if k in _REDACTED_KEYS and obj[k] else _redact(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_redact(v) for v in obj]
+    return obj
+
 
 class ExperimentLogger:
 
     def __init__(self, experiment_name: str, dataset_name: str, config: dict):
         self.experiment_name = experiment_name
         self.dataset_name = dataset_name
-        self.config_snapshot = copy.deepcopy(config)
+        self.config_snapshot = _redact(copy.deepcopy(config))
         self.phases: list[dict] = []
         self._phase_starts: dict[str, float] = {}
         self._start_time = time.time()

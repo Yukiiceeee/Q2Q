@@ -1,6 +1,11 @@
 """Fake Query Generation prompts - multi-dimension routing with style/role control."""
 
 from src.prompts.query_format import get_fq_format_spec
+from src.prompts.scene_prompts import (
+    SCENE_DIALOGUE,
+    get_scene_constraints,
+    get_scene_dimension_spec,
+)
 
 
 # ======================== Style Instruction Templates ========================
@@ -82,11 +87,13 @@ FAKE_QUERY_GEN_PROMPT_ZH = """你是一个记忆索引助手。给定一组原�
 ## 核心约束
 1. 每条查询必须包含来源命题中的2个以上具体关键词（人名、数值、日期等）
 2. 禁止生成可匹配多个不同事件的笼统查询
-3. **必须同时包含第一人称和第三方视角的查询**：至少40%使用第三方视角（如"Melanie什么时候..."而非"我什么时候..."）
+3. **必须同时包含第一人称和第三方视角的查询**：至少40%使用第三方视角，即用命题中出现的具体人名或身份指代（如"该用户"、"患者"）作主语，而非"我"
 4. **强制要求**：至少 2 条查询必须是 temporal 维度
 5. **强制要求**：至少 40% 的查询必须在15字以内——短句自然提问
 6. **覆盖所有命题**：每个命题至少被一条查询覆盖
-
+7. **禁止语义重复**：任意两条查询不得互为改写；每条查询应覆盖不同的命题组合或不同的提问维度
+8. **跨命题关联**：至少 2 条查询绑定 2 个以上命题（聚合、对比或关联查询），以支持多跳问题检索
+{scene_constraints}
 ## 输入命题列表
 {propositions_text}
 
@@ -120,11 +127,13 @@ FAKE_QUERY_GEN_PROMPT_EN = """You are a memory indexing assistant. Given a set o
 ## Core Constraints
 1. Each query MUST contain 2+ specific keywords from the source propositions (person names, values, dates, etc.)
 2. Do NOT generate generic queries that could match multiple unrelated events
-3. **MUST include both first-person and third-person perspective queries**: at least 40% should use third-person perspective (e.g., "When did Melanie..." instead of "When did I...")
+3. **MUST include both first-person and third-person perspective queries**: at least 40% should use third-person perspective, i.e. a concrete name or role reference that appears in the propositions (e.g. "the user", "the patient") as the subject, rather than "I"
 4. **MANDATORY**: At least 2 queries must be temporal dimension
 5. **MANDATORY**: At least 40% of queries must be under 15 words — short, natural questions
 6. **Full coverage**: EVERY proposition must be covered by at least one query
-
+7. **No semantic duplicates**: no two queries may be paraphrases of each other; each query should cover a distinct proposition combination or a distinct question angle
+8. **Cross-proposition linking**: at least 2 queries must bind 2+ propositions (aggregation, comparison, or association queries) to support multi-hop retrieval
+{scene_constraints}
 ## Input Propositions
 {propositions_text}
 
@@ -159,15 +168,21 @@ def build_fake_query_gen_prompt(
     language: str = "zh",
     style: str = "formal",
     role: str = "user",
+    scene: str = SCENE_DIALOGUE,
 ) -> str:
     template = FAKE_QUERY_GEN_PROMPT_ZH if language == "zh" else FAKE_QUERY_GEN_PROMPT_EN
-    dimension_spec = DIMENSION_SPEC_ZH if language == "zh" else DIMENSION_SPEC_EN
+
+    # Scene-specific dimension table when one exists; otherwise the dialogue default.
+    dimension_spec = get_scene_dimension_spec(scene, language)
+    if dimension_spec is None:
+        dimension_spec = DIMENSION_SPEC_ZH if language == "zh" else DIMENSION_SPEC_EN
 
     return template.format(
         query_format_spec=get_fq_format_spec(language),
         dimension_spec=dimension_spec,
         style_instruction=get_style_instruction(style, language),
         role_instruction=get_role_instruction(role, language),
+        scene_constraints=get_scene_constraints(scene, language),
         propositions_text=propositions_text,
         num_queries=num_queries,
     )

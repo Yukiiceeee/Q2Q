@@ -6,6 +6,7 @@ import logging
 from src.schemas.models import SubQuery
 from src.embedding.base import BaseEmbeddingProvider
 from src.utils.llm_client import BaseLLMClient, format_messages
+from src.utils.query_text import sanitize_query
 from src.prompts.query_decompose import build_query_decompose_prompt
 
 logger = logging.getLogger(__name__)
@@ -24,13 +25,36 @@ class QueryDecomposer:
         self.language = language
 
     async def decompose(self, raw_query: str, history: str = "") -> list[SubQuery]:
+        # Callers may hand over the whole prompt they intend to send to the
+        # answer model; only the question itself is a retrieval signal.
+        # Sanitising here (rather than trusting the caller) keeps every
+        # downstream embedding free of template scaffolding.
+        raw_query = sanitize_query(raw_query)
+        if not raw_query:
+            return []
+
         prompt = build_query_decompose_prompt(raw_query, history, self.language)
         messages = format_messages(user_message=prompt)
         response = await self.llm_client.chat(messages, temperature=0.3)
         parsed = self._parse_sub_queries(response.content)
+        # The model can echo scaffolding back into a sub-query; the same
+        # sanitiser applies to whatever it returns.
+        parsed = [
+            {**item, "query": sanitize_query(item["query"])}
+            for item in parsed
+            if item.get("query")
+        ]
+        parsed = [item for item in parsed if item["query"]]
 
         if not parsed:
             parsed = [{"query": raw_query, "keywords": ""}]
+
+        # Always include the raw query itself as a safety-net sub-query:
+        # guarantees retrieval quality even if decomposition distorts intent
+        # (costs one extra local embedding, zero LLM calls).
+        norm_raw = raw_query.strip().lower()
+        if not any(item["query"].strip().lower() == norm_raw for item in parsed):
+            parsed.append({"query": raw_query, "keywords": ""})
 
         embed_texts = []
         for item in parsed:

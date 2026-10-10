@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
 
 import numpy as np
 import torch
@@ -23,6 +22,14 @@ _DATE_PATTERN = re.compile(
 _NUMBER_PATTERN = re.compile(r'\d+')
 _QUOTE_PATTERN = re.compile(r'["“”‘’]')
 _PROPER_NOUN_PATTERN = re.compile(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b')
+# Structured list items (markdown bullets / numbered) are dense enumerations
+# (e.g. indicator lists) whose short length yields deceptively low NLL
+_LIST_ITEM_PATTERN = re.compile(r'^\s*([-*•]|\d+[.、)])\s*\S')
+# Ordinal record headers ("Step 12:", "Turn 3:", "Message 7 -") are the spine of
+# enumerated records: short, low-perplexity, and useless to drop.
+_ORDINAL_HEADER_PATTERN = re.compile(
+    r'^\s*(step|turn|round|message|episode|iteration|第)\s*_?\d+', re.IGNORECASE
+)
 
 
 class PerplexityCompressor:
@@ -61,20 +68,37 @@ class PerplexityCompressor:
 
         self._load_model()
 
-        sentences = self._split_sentences(session_text)
-        if not sentences:
+        # Compress within each line and rejoin with newlines. Line structure is
+        # load-bearing in every scene — speaker turns in dialogue, "Step N:" /
+        # "Action:" / "Observation:" spines in traces, bullets in documents —
+        # and flattening it into one blob destroys the anchors that retrieval
+        # and answering depend on.
+        kept_lines: list[str] = []
+        total_sentences = 0
+        kept_sentences = 0
+
+        for line in session_text.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            sentences = self._split_sentences(stripped)
+            if not sentences:
+                continue
+            total_sentences += len(sentences)
+            kept = [s for s in sentences if self._should_keep(s)]
+            kept_sentences += len(kept)
+            if kept:
+                kept_lines.append(" ".join(kept))
+
+        if not kept_lines:
             return session_text
 
-        kept_sentences = []
-        for sentence in sentences:
-            if self._should_keep(sentence):
-                kept_sentences.append(sentence)
-
-        result = " ".join(kept_sentences)
+        result = "\n".join(kept_lines)
         ratio = len(result) / max(len(session_text), 1)
         logger.info(
             f"Sentence compression: {len(session_text)} -> {len(result)} chars "
-            f"(ratio={ratio:.2f}, kept {len(kept_sentences)}/{len(sentences)} sentences)"
+            f"(ratio={ratio:.2f}, kept {kept_sentences}/{total_sentences} sentences "
+            f"in {len(kept_lines)} lines)"
         )
         return result
 
@@ -108,6 +132,10 @@ class PerplexityCompressor:
         if _QUOTE_PATTERN.search(sentence) and len(sentence) > 10:
             return True
         if _PROPER_NOUN_PATTERN.search(sentence):
+            return True
+        if _LIST_ITEM_PATTERN.match(sentence):
+            return True
+        if _ORDINAL_HEADER_PATTERN.match(sentence):
             return True
         digit_count = len(_NUMBER_PATTERN.findall(sentence))
         if digit_count >= 2:

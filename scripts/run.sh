@@ -4,8 +4,7 @@
 #
 # Examples:
 #   ./scripts/run.sh                          # Default: interactive mode
-#   ./scripts/run.sh --alpha 0.8 --top-k 3    # Custom hyperparams
-#   ./scripts/run.sh --storage json            # Use JSON backend
+#   ./scripts/run.sh --top-k 3                # Custom hyperparams
 #   ./scripts/run.sh memorize --file data.txt  # Batch memorize
 
 set -e
@@ -25,11 +24,10 @@ fi
 # ============================================================================
 # Hyperparameters (adjust for experiments)
 # ============================================================================
-ALPHA=0.7                 # Q2Q weight (0-1), higher = more Q2Q
 TOP_K=5                   # Top-K candidates per sub-query
 TOP_N=10                  # Top-N final results
 NUM_FAKE_QUERIES=5        # Hypothetical queries per memory entry
-STORAGE="chromadb"        # Storage backend: chromadb / json
+STORAGE="chromadb"        # Storage backend (only chromadb is implemented)
 LANGUAGE="zh"             # Prompt language: zh / en
 LOG_LEVEL="INFO"          # Log level: DEBUG / INFO / WARNING
 
@@ -37,7 +35,6 @@ LOG_LEVEL="INFO"          # Log level: DEBUG / INFO / WARNING
 # Launch
 # ============================================================================
 $PYTHON main.py \
-    --alpha "$ALPHA" \
     --top-k "$TOP_K" \
     --top-n "$TOP_N" \
     --num-fake-queries "$NUM_FAKE_QUERIES" \

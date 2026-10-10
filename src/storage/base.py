@@ -61,19 +61,13 @@ class BaseMemoryStore(ABC):
     async def get_propositions_by_ids(self, prop_ids: list[str], session_id: str) -> list[dict]:
         ...
 
-    @abstractmethod
-    async def search_propositions(
-        self, query_embedding: np.ndarray, session_id: str, top_k: int = 5
-    ) -> list[dict]:
-        ...
+    async def get_proposition_embeddings(
+        self, prop_ids: list[str], session_id: str
+    ) -> dict[str, np.ndarray]:
+        """Return {prop_id: embedding} for stored propositions. Optional capability."""
+        return {}
 
     # --- Content (pre_session_text) operations ---
-
-    @abstractmethod
-    async def search_content(
-        self, query_embedding: np.ndarray, top_k: int = 10
-    ) -> list[dict]:
-        ...
 
     @abstractmethod
     async def batch_search_content(
@@ -88,14 +82,6 @@ class BaseMemoryStore(ABC):
         ...
 
     @abstractmethod
-    async def get_edges_from(self, src_id: str) -> list[Edge]:
-        ...
-
-    @abstractmethod
-    async def get_edges_to(self, dst_id: str) -> list[Edge]:
-        ...
-
-    @abstractmethod
     async def get_all_edges(self) -> list[Edge]:
         ...
 
@@ -105,4 +91,8 @@ class BaseMemoryStore(ABC):
 
     @abstractmethod
     async def delete_node(self, query_id: str) -> None:
+        ...
+
+    @abstractmethod
+    async def update_fq_metadata(self, query_id: str, updates: dict) -> None:
         ...

@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from src.config import Q2QConfig
-from src.schemas.models import MemoryEntry, RetrievalResult, RetrievalResponse
+from src.schemas.models import MemoryEntry
 from src.utils.llm_client import create_llm_client, BaseLLMClient, get_usage_tracker
 from src.embedding.factory import create_embedding_provider
 from src.embedding.base import BaseEmbeddingProvider
@@ -68,6 +68,7 @@ class Q2QAgent:
             num_queries=config.retrieval.num_fake_queries,
             language=config.language,
             binding_verify_threshold=config.retrieval.binding_verify_threshold,
+            max_extra_bindings=config.retrieval.max_extra_bindings,
             style=config.retrieval.fq_style,
             role=config.retrieval.fq_role,
         )
@@ -87,12 +88,14 @@ class Q2QAgent:
             evolve_threshold=config.graph.evolve_threshold,
             diverge_low=config.graph.diverge_low,
             diverge_high=config.graph.diverge_high,
+            link_similarity=config.graph.link_similarity,
             max_parents=config.graph.max_parents,
             similarity_top_k=config.graph.similarity_top_k,
             maintenance_interval=config.graph.maintenance_interval,
             merge_overlap_threshold=config.graph.merge_overlap_threshold,
             max_chain_length=config.graph.max_chain_length,
             chain_sample_interval=config.graph.chain_sample_interval,
+            max_chain_nodes=config.graph.max_chain_nodes,
         )
 
         # --- Phase 4: Retrieval & Answer ---
@@ -111,12 +114,14 @@ class Q2QAgent:
             top_k_q2c=config.retrieval.top_k_q2c,
             chain_depth=config.retrieval.chain_depth,
             prop_top_k_per_fq=config.retrieval.prop_top_k_per_fq,
+            max_fqs_per_session=config.retrieval.max_fqs_per_session,
         )
 
         self.answerer = Answerer(
             llm_client=self.llm_client,
             language=config.language,
             max_context_tokens=config.retrieval.max_context_tokens,
+            embedding_provider=self.embedding_provider,
         )
 
         self.usage_tracker = get_usage_tracker()

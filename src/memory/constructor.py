@@ -11,6 +11,7 @@ from src.schemas.models import MemoryEntry, FakeQuery, Proposition
 from src.embedding.base import BaseEmbeddingProvider
 from src.preprocessing.compressor import PerplexityCompressor
 from src.preprocessing.proposition_extractor import PropositionExtractor
+from src.preprocessing.scene_detector import detect_scene
 from src.memory.query_generator import FakeQueryGenerator
 from src.storage.base import BaseMemoryStore
 
@@ -47,7 +48,9 @@ class MemoryConstructor:
                 r'\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2},?\s*\d{4})\b',
                 re.IGNORECASE,
             ),
-            re.compile(r'\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4})\b', re.IGNORECASE),
+            re.compile(r'\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*,?\s+\d{4})\b', re.IGNORECASE),
+            # Chinese written dates, e.g. "2024年1月5日" / "2024年1月".
+            re.compile(r'(\d{4}\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)'),
         ]
         for pattern in date_patterns:
             match = pattern.search(session_text[:500])
@@ -60,19 +63,39 @@ class MemoryConstructor:
         session_id = entry.session_id
         session_date = self._extract_session_date(session_text, metadata or {})
 
-        logger.info(f"--- MemoryConstructor.build_memory ({len(session_text)} chars, date={session_date}) ---")
+        # Detect once and reuse: extraction and FQ generation must agree on the
+        # scene, and the detector is a pure regex scan over the raw text.
+        scene = detect_scene(session_text)
+        entry.metadata["scene"] = scene
+
+        logger.info(
+            f"--- MemoryConstructor.build_memory ({len(session_text)} chars, "
+            f"date={session_date}, scene={scene}) ---"
+        )
 
         # Phase 1: Parallel - compression + proposition extraction
         compress_task = asyncio.create_task(
             asyncio.to_thread(self.compressor.compress, session_text)
         )
         props_task = asyncio.create_task(
-            self.prop_extractor.extract(session_text, session_id, session_date=session_date)
+            self.prop_extractor.extract(
+                session_text, session_id, session_date=session_date, scene=scene
+            )
         )
 
         pre_session_text, propositions = await asyncio.gather(compress_task, props_task)
         entry.pre_session_text = pre_session_text
         entry.propositions = propositions
+
+        # Stamp every proposition with the date of the session it came from. The
+        # extractor's `time` field holds when the event happened and is often
+        # coarse ("about May 2023"); "when was this recorded" is a different
+        # question and the answer is already known here, at zero LLM cost.
+        entry.metadata["session_date"] = session_date
+        if session_date:
+            for p in propositions:
+                if not p.record_date:
+                    p.record_date = session_date
 
         # Debug: compression stats
         compress_ratio = len(pre_session_text) / max(len(session_text), 1)
@@ -102,7 +125,7 @@ class MemoryConstructor:
 
         # Phase 2: FQ generation (uses propositions)
         fake_queries = await self.query_generator.generate(
-            propositions, session_text, session_id
+            propositions, session_text, session_id, scene=scene
         )
         entry.fake_queries = fake_queries
 

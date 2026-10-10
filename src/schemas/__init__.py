@@ -3,7 +3,6 @@ from src.schemas.models import (
     MemoryEntry,
     SubQuery,
     RetrievalResult,
-    RetrievalResponse,
 )
 
 __all__ = [
@@ -11,5 +10,4 @@ __all__ = [
     "MemoryEntry",
     "SubQuery",
     "RetrievalResult",
-    "RetrievalResponse",
 ]
