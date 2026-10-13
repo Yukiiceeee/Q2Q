@@ -19,6 +19,7 @@ from src.memory.graph_manager import MemoryGraphManager
 from src.retrieval.query_decomposer import QueryDecomposer
 from src.retrieval.dual_retriever import DualRetriever
 from src.retrieval.answerer import Answerer
+from src.retrieval.focus import FocusWindow
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,13 @@ class Q2QAgent:
             language=config.language,
         )
 
+        # One window shared by retriever and answerer: same tokenizer, and a
+        # session the retriever already trimmed is not re-embedded downstream.
+        self.focus_window = FocusWindow(
+            embedding_provider=self.embedding_provider,
+            tokenizer_model=config.llm.model,
+        )
+
         self.dual_retriever = DualRetriever(
             embedding_provider=self.embedding_provider,
             memory_store=self.memory_store,
@@ -115,6 +123,8 @@ class Q2QAgent:
             chain_depth=config.retrieval.chain_depth,
             prop_top_k_per_fq=config.retrieval.prop_top_k_per_fq,
             max_fqs_per_session=config.retrieval.max_fqs_per_session,
+            session_text_budget_tokens=config.retrieval.session_text_budget_tokens,
+            focus_window=self.focus_window,
         )
 
         self.answerer = Answerer(
@@ -122,6 +132,7 @@ class Q2QAgent:
             language=config.language,
             max_context_tokens=config.retrieval.max_context_tokens,
             embedding_provider=self.embedding_provider,
+            focus_window=self.focus_window,
         )
 
         self.usage_tracker = get_usage_tracker()

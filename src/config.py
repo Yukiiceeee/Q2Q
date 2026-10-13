@@ -56,6 +56,7 @@ class RetrievalConfig:
     top_k_q2c: int = 3
     num_fake_queries: int = 15
     max_context_tokens: int = 10000
+    session_text_budget_tokens: int = 0
     chain_depth: int = 3
     prop_top_k_per_fq: int = 3
     max_fqs_per_session: int = 3

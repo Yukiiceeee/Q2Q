@@ -11,6 +11,7 @@ from src.schemas.models import SubQuery, FakeQuery, Proposition, RetrievalResult
 from src.embedding.base import BaseEmbeddingProvider
 from src.storage.base import BaseMemoryStore
 from src.memory.graph_manager import MemoryGraphManager
+from src.retrieval.focus import FocusWindow
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ class DualRetriever:
         chain_depth: int = 3,
         prop_top_k_per_fq: int = 3,
         max_fqs_per_session: int = 3,
+        session_text_budget_tokens: int = 0,
+        focus_window: FocusWindow | None = None,
     ):
         self.embedding_provider = embedding_provider
         self.memory_store = memory_store
@@ -38,6 +41,12 @@ class DualRetriever:
         self.chain_depth = chain_depth
         self.prop_top_k_per_fq = prop_top_k_per_fq
         self.max_fqs_per_session = max_fqs_per_session
+        # 0 keeps the retriever's historical behaviour: session texts leave
+        # untrimmed and whoever consumes them decides what fits.
+        self.session_text_budget_tokens = session_text_budget_tokens
+        self.focus_window = focus_window or FocusWindow(
+            embedding_provider=embedding_provider
+        )
 
     async def retrieve(self, sub_queries: list[SubQuery]) -> RetrievalResult:
         valid_sqs = [sq for sq in sub_queries if sq.embedding is not None]
@@ -93,6 +102,19 @@ class DualRetriever:
             if text:
                 q2c_session_texts.append(text)
 
+        # === Trim session texts to a query-relevant window before they leave ===
+        if self.session_text_budget_tokens > 0:
+            remaining = self.session_text_budget_tokens
+            direct_session_texts, remaining = await self._window_texts(
+                direct_session_texts, remaining, valid_sqs
+            )
+            chain_session_texts, remaining = await self._window_texts(
+                chain_session_texts, remaining, valid_sqs
+            )
+            q2c_session_texts, remaining = await self._window_texts(
+                q2c_session_texts, remaining, valid_sqs
+            )
+
         # === Merge chain_props + q2c_props for backward compat (ranked_propositions) ===
         merged_props = self._merge_propositions(chain_props, q2c_props)
 
@@ -122,6 +144,44 @@ class DualRetriever:
             f"{len(merged_props)} merged (ranked) props total"
         )
         return result
+
+    async def _window_texts(
+        self,
+        texts: list[str],
+        budget: int,
+        sub_queries: list[SubQuery],
+    ) -> tuple[list[str], int]:
+        """Fit `texts` into `budget` tokens, keeping query-relevant parts.
+
+        Tiers are windowed in priority order (direct → chain → Q2C) and each
+        tier is handed the budget its predecessors left over, so the passage the
+        Q2Q path matched directly is never squeezed to make room for a
+        content-similarity hit further down. Within a tier every block of every
+        passage competes for the tier's whole budget, which is what keeps the
+        two dataset shapes from needing different settings: a lone oversized
+        trajectory simply gets all of it, while five dialogue chunks let the
+        budget settle on whichever of them the question is about.
+
+        Trimming here rather than at the consumer is what actually saves money.
+        The consumer sees whole passages and can only take or drop them, so a
+        19k-token trace is either paid for in full or lost entirely; the
+        retriever can hand over the 8k tokens of it the sub-queries point at.
+        """
+        if not texts:
+            return texts, budget
+        if budget <= 0:
+            return [], 0
+
+        before = sum(self.focus_window.count_tokens(t) for t in texts)
+        kept = await self.focus_window.focus_many(texts, budget, sub_queries)
+        used = sum(self.focus_window.count_tokens(t) for t in kept)
+
+        if used < before:
+            logger.info(
+                f"Windowed session texts: {len(texts)} passages -> {len(kept)}, "
+                f"{before} -> {used} tokens (budget {budget})"
+            )
+        return kept, max(budget - used, 0)
 
     async def _get_session_text(self, session_id: str) -> str:
         entry = await self.memory_store.get_by_id(session_id)
