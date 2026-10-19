@@ -22,27 +22,30 @@ from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, s
 
 from experiment.src.experiment_base import ExperimentBase
 from experiment.src.metrics import AlignmentMetrics, AlignmentResult
+from experiment.src import plot_style as ps
 
 logger = logging.getLogger(__name__)
 
 VARIANT_KEYS = ["q2p", "q2n", "q2r"]
 VARIANT_STORE_NAMES = ["propositions", "notes", "reflections"]
 
+# Method colours come from the shared paper palette so a hue means the same
+# method in every figure; keyed by display name here for local convenience.
 METHOD_COLORS = {
-    "Q2Q": "#2196F3",
-    "Q2P": "#9C27B0",
-    "Q2N": "#E91E63",
-    "Q2R": "#009688",
-    "Q2C": "#FF9800",
+    "Q2Q": ps.METHOD_COLORS["q2q"],
+    "Q2P": ps.METHOD_COLORS["q2p"],
+    "Q2N": ps.METHOD_COLORS["q2n"],
+    "Q2R": ps.METHOD_COLORS["q2r"],
+    "Q2C": ps.METHOD_COLORS["q2c"],
 }
 
 EMBED_TYPES = {
-    "TQ": {"label": "True Query (TQ)", "color": "#2196F3", "size": 40, "alpha": 0.9, "id": 0},
-    "FQ": {"label": "Fake Query (FQ)", "color": "#FF9800", "size": 12, "alpha": 0.4, "id": 1},
-    "C": {"label": "Content Chunk (C)", "color": "#4CAF50", "size": 12, "alpha": 0.4, "id": 2},
-    "P": {"label": "Proposition (P)", "color": "#9C27B0", "size": 12, "alpha": 0.4, "id": 3},
-    "N": {"label": "Note (N)", "color": "#E91E63", "size": 12, "alpha": 0.4, "id": 4},
-    "R": {"label": "Reflection (R)", "color": "#009688", "size": 12, "alpha": 0.4, "id": 5},
+    "TQ": {"label": "True Query (TQ)", "color": ps.EMBED_COLORS["true_query"], "size": 40, "alpha": 0.9, "id": 0},
+    "AQ": {"label": "Anchor Query (AQ)", "color": ps.EMBED_COLORS["anchor_query"], "size": 12, "alpha": 0.4, "id": 1},
+    "C": {"label": "Content Chunk (C)", "color": ps.EMBED_COLORS["content"], "size": 12, "alpha": 0.4, "id": 2},
+    "P": {"label": "Proposition (P)", "color": ps.EMBED_COLORS["proposition"], "size": 12, "alpha": 0.4, "id": 3},
+    "N": {"label": "Note (N)", "color": ps.EMBED_COLORS["note"], "size": 12, "alpha": 0.4, "id": 4},
+    "R": {"label": "Reflection (R)", "color": ps.EMBED_COLORS["reflection"], "size": 12, "alpha": 0.4, "id": 5},
 }
 
 
@@ -462,16 +465,67 @@ class Exp1Alignment(ExperimentBase):
             nearest_masks[baseline_label] = keep
 
         subplot_cfgs = [
-            ("TQ vs FQ vs Content", [(1, "#2196F3", "Fake Query"), (2, "#FF9800", "Content")]),
-            ("TQ vs FQ vs Proposition", [(1, "#2196F3", "Fake Query"), (3, "#9C27B0", "Proposition")]),
-            ("TQ vs FQ vs Note", [(1, "#2196F3", "Fake Query"), (4, "#E91E63", "Note")]),
-            ("TQ vs FQ vs Reflection", [(1, "#2196F3", "Fake Query"), (5, "#009688", "Reflection")]),
+            ("TQ vs AQ vs Content",
+             [(1, ps.EMBED_COLORS["anchor_query"], "Anchor Query"),
+              (2, ps.EMBED_COLORS["content"], "Content")]),
+            ("TQ vs AQ vs Proposition",
+             [(1, ps.EMBED_COLORS["anchor_query"], "Anchor Query"),
+              (3, ps.EMBED_COLORS["proposition"], "Proposition")]),
+            ("TQ vs AQ vs Note",
+             [(1, ps.EMBED_COLORS["anchor_query"], "Anchor Query"),
+              (4, ps.EMBED_COLORS["note"], "Note")]),
+            ("TQ vs AQ vs Reflection",
+             [(1, ps.EMBED_COLORS["anchor_query"], "Anchor Query"),
+              (5, ps.EMBED_COLORS["reflection"], "Reflection")]),
         ]
 
+        # One legend for the whole figure, placed on its own row underneath:
+        # the representation types are shared by all four panels, so repeating
+        # them per panel costs space and reads worse.
+        tq_color = ps.EMBED_COLORS["true_query"]
+        legend_specs = [
+            ("True Query (TQ)", tq_color),
+            ("Anchor Query (AQ)", ps.EMBED_COLORS["anchor_query"]),
+            ("Content (C)", ps.EMBED_COLORS["content"]),
+            ("Proposition (P)", ps.EMBED_COLORS["proposition"]),
+            ("Note (N)", ps.EMBED_COLORS["note"]),
+            ("Reflection (R)", ps.EMBED_COLORS["reflection"]),
+        ]
+
+        def _legend_handles():
+            from matplotlib.lines import Line2D
+
+            return [
+                Line2D(
+                    [0], [0], marker="o", color="none", label=name,
+                    markerfacecolor=color, markeredgecolor="white",
+                    markeredgewidth=0.9, markersize=15,
+                )
+                for name, color in legend_specs
+            ]
+
+        def _panel_axes(ax, title: str) -> None:
+            ax.set_title(title, fontsize=23, fontweight="bold", pad=12)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for side in ("top", "right", "bottom", "left"):
+                ax.spines[side].set_visible(True)
+                ax.spines[side].set_color("#BBBBBB")
+                ax.spines[side].set_linewidth(1.0)
+
+        def _add_legend(fig) -> None:
+            fig.legend(
+                handles=_legend_handles(), loc="lower center", ncol=6,
+                fontsize=22, frameon=True, fancybox=False, edgecolor="gray",
+                bbox_to_anchor=(0.5, -0.015), columnspacing=1.4,
+                handletextpad=0.45, borderpad=0.6, labelspacing=0.4,
+            )
+
+        ps.use_paper_style()
         paths = {}
 
         # --- Figure 1: All points ---
-        fig1, axes1 = plt.subplots(1, 4, figsize=(28, 6))
+        fig1, axes1 = plt.subplots(1, 4, figsize=(19, 5.9), dpi=150)
         for i, (title, baselines) in enumerate(subplot_cfgs):
             ax = axes1[i]
             for bl_label, bl_color, bl_name in reversed(baselines):
@@ -485,24 +539,23 @@ class Exp1Alignment(ExperimentBase):
             tq_mask = labels == 0
             ax.scatter(
                 X_2d[tq_mask, 0], X_2d[tq_mask, 1],
-                c="#E53935", s=28, alpha=0.85, edgecolors="white",
+                c=tq_color, s=28, alpha=0.85, edgecolors="white",
                 linewidths=0.3, label="True Query", zorder=3,
             )
-            ax.set_title(title, fontsize=13, fontweight="bold")
-            ax.legend(fontsize=9, loc="upper right", framealpha=0.8)
-            ax.set_xticks([])
-            ax.set_yticks([])
+            _panel_axes(ax, title)
 
-        fig1.suptitle("Embedding Space — All Points (t-SNE)", fontsize=15, y=1.02)
-        fig1.tight_layout()
+        fig1.suptitle(
+            "Embedding Space — All Points (t-SNE)", fontsize=27, fontweight="bold", y=0.912
+        )
+        fig1.tight_layout(rect=(0, 0.12, 1, 0.93), w_pad=1.2)
+        _add_legend(fig1)
         p1 = self.figs_dir / "exp1_tsne_all.png"
-        fig1.savefig(p1, dpi=300, bbox_inches="tight")
-        plt.close(fig1)
+        ps.save_paper_figure(fig1, p1)
         paths["tsne_all"] = p1
         logger.info(f"  t-SNE (all) saved to {p1}")
 
         # --- Figure 2: Nearest neighbor only ---
-        fig2, axes2 = plt.subplots(1, 4, figsize=(28, 6))
+        fig2, axes2 = plt.subplots(1, 4, figsize=(19, 5.9), dpi=150)
         for i, (title, baselines) in enumerate(subplot_cfgs):
             ax = axes2[i]
             for bl_label, bl_color, bl_name in reversed(baselines):
@@ -517,7 +570,7 @@ class Exp1Alignment(ExperimentBase):
             tq_mask = labels == 0
             ax.scatter(
                 X_2d[tq_mask, 0], X_2d[tq_mask, 1],
-                c="#E53935", s=28, alpha=0.85, edgecolors="white",
+                c=tq_color, s=28, alpha=0.85, edgecolors="white",
                 linewidths=0.3, label="True Query", zorder=3,
             )
             for tq_idx in tq_indices:
@@ -533,16 +586,16 @@ class Exp1Alignment(ExperimentBase):
                         [X_2d[tq_idx, 1], X_2d[nn_idx, 1]],
                         color=bl_color, linewidth=0.4, alpha=0.25, zorder=1,
                     )
-            ax.set_title(title + " (nearest)", fontsize=13, fontweight="bold")
-            ax.legend(fontsize=9, loc="upper right", framealpha=0.8)
-            ax.set_xticks([])
-            ax.set_yticks([])
+            _panel_axes(ax, title + " (nearest)")
 
-        fig2.suptitle("Embedding Space — Nearest Neighbor per Query (t-SNE)", fontsize=15, y=1.02)
-        fig2.tight_layout()
+        fig2.suptitle(
+            "Embedding Space — Nearest Neighbor per Query (t-SNE)",
+            fontsize=27, fontweight="bold", y=0.912,
+        )
+        fig2.tight_layout(rect=(0, 0.12, 1, 0.93), w_pad=1.2)
+        _add_legend(fig2)
         p2 = self.figs_dir / "exp1_tsne_nearest.png"
-        fig2.savefig(p2, dpi=300, bbox_inches="tight")
-        plt.close(fig2)
+        ps.save_paper_figure(fig2, p2)
         paths["tsne_nearest"] = p2
         logger.info(f"  t-SNE (nearest) saved to {p2}")
 
@@ -616,9 +669,9 @@ class Exp1Alignment(ExperimentBase):
 
     def _plot_method_comparison(self, results: list[AlignmentResult]) -> Path:
         logger.info("Phase 6c: Method comparison bar chart...")
-        dataset_name = self.dataset_config["dataset"]["name"]
 
         methods = ["Q2Q", "Q2P", "Q2N", "Q2R", "Q2C"]
+        keys = ["q2q", "q2p", "q2n", "q2r", "q2c"]
         attr_keys = ["sim_q2q", "sim_q2p", "sim_q2n", "sim_q2r", "sim_q2c"]
         means, stds = [], []
         for key in attr_keys:
@@ -626,27 +679,38 @@ class Exp1Alignment(ExperimentBase):
             means.append(float(np.mean(vals)))
             stds.append(float(np.std(vals)))
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        ps.use_paper_style()
+        fig, ax = plt.subplots(1, 1, figsize=(11, 6.5), dpi=150)
         x = np.arange(len(methods))
-        colors = [METHOD_COLORS[m] for m in methods]
-        bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors, alpha=0.85, edgecolor="white")
+        ax.bar(
+            x, means, 0.56,
+            color=[ps.METHOD_COLORS[k] for k in keys],
+            hatch=[ps.METHOD_HATCHES[k] for k in keys],
+            edgecolor="white", linewidth=0,
+            yerr=stds, capsize=7, zorder=3,
+            error_kw={"ecolor": "#3A3A3A", "elinewidth": 1.8, "capthick": 1.8, "zorder": 4},
+        )
 
-        for bar, mean in zip(bars, means):
+        # Place the value above the whisker, not inside it, so the error bar
+        # never strikes through the number.
+        for xi, mean, std in zip(x, means, stds):
             ax.text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                f"{mean:.4f}", ha="center", va="bottom", fontsize=10,
+                xi, mean + std + 0.022, f"{mean:.4f}",
+                ha="center", va="bottom", fontsize=19, fontweight="bold", zorder=5,
             )
 
+        yticks = np.arange(0, 1.01, 0.2)
+        ax.set_ylim(0, 1.0)
+        ax.set_yticks(yticks)
         ax.set_xticks(x)
-        ax.set_xticklabels(methods, fontsize=12)
-        ax.set_ylabel("Mean Similarity", fontsize=12)
-        ax.set_title(f"Five-Method Alignment Comparison ({dataset_name})", fontsize=14)
-        ax.set_ylim(0, max(means) + 0.15)
-        plt.tight_layout()
+        ax.set_xticklabels(methods, fontsize=26, fontweight="bold")
+        ax.set_xlim(-0.6, len(methods) - 0.4)
+        ax.set_ylabel("Mean Similarity", fontsize=28, fontweight="bold", labelpad=12)
+        ax.set_title("Alignment Comparison", fontsize=28, fontweight="bold", pad=16)
+        ps.style_axes(ax, yticks, tick_labelsize=24, xtick_labelsize=26)
 
         out_path = self.figs_dir / "exp1_method_comparison.png"
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
+        ps.save_paper_figure(fig, out_path)
         logger.info(f"  Method comparison saved to {out_path}")
         return out_path
 
@@ -933,39 +997,47 @@ class Exp1Alignment(ExperimentBase):
 
     def _plot_precision_at_k(self, prec_results: dict) -> Path:
         logger.info("Phase 10c: Precision@K visualization...")
-        dataset_name = self.dataset_config["dataset"]["name"]
 
-        methods = ["Q2Q", "Q2P", "Q2N", "Q2R", "Q2C"]
         method_keys = ["q2q", "q2p", "q2n", "q2r", "q2c"]
-        colors = [METHOD_COLORS[m] for m in methods]
         k_values = ["P@1", "P@5", "P@10"]
 
-        fig, axes = plt.subplots(1, 3, figsize=(16, 5), sharey=True)
-        x = np.arange(len(methods))
-        width = 0.6
+        ps.use_paper_style()
+        fig, ax = plt.subplots(1, 1, figsize=(14, 7), dpi=150)
+        x = np.arange(len(k_values))
+        bar_width, gap = 0.15, 0.012
 
-        for ki, k_label in enumerate(k_values):
-            ax = axes[ki]
-            vals = [prec_results[m].get(k_label, 0) for m in method_keys]
-            bars = ax.bar(x, vals, width, color=colors, alpha=0.85, edgecolor="white")
-            for bar, v in zip(bars, vals):
+        for i, m in enumerate(method_keys):
+            offset = (i - (len(method_keys) - 1) / 2) * (bar_width + gap)
+            vals = [prec_results[m].get(k, 0) * 100 for k in k_values]
+            ax.bar(
+                x + offset, vals, bar_width,
+                color=ps.METHOD_COLORS[m], hatch=ps.METHOD_HATCHES[m],
+                edgecolor="white", linewidth=0,
+                label=ps.METHOD_LABELS[m], zorder=3,
+            )
+            for xi, v in zip(x + offset, vals):
                 ax.text(
-                    bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                    f"{v:.2%}", ha="center", va="bottom", fontsize=9,
+                    xi, v + 1.2, f"{v:.1f}",
+                    ha="center", va="bottom", fontsize=13, fontweight="bold", zorder=4,
                 )
-            ax.set_xticks(x)
-            ax.set_xticklabels(methods, fontsize=10)
-            ax.set_title(k_label, fontsize=13, fontweight="bold")
-            ax.set_ylim(0, 1.15)
-            ax.grid(axis="y", alpha=0.2)
 
-        axes[0].set_ylabel("Precision", fontsize=12)
-        plt.suptitle(f"Retrieval Precision@K ({dataset_name})", fontsize=14, y=1.01)
-        plt.tight_layout()
+        yticks = np.arange(0, 101, 20)
+        ax.set_ylim(0, 122)
+        ax.set_yticks(yticks)
+        ax.set_xticks(x)
+        ax.set_xticklabels(k_values, fontsize=26, fontweight="bold")
+        ax.set_ylabel("Precision (%)", fontsize=28, fontweight="bold", labelpad=12)
+        ax.set_title("Retrieval Precision@K", fontsize=28, fontweight="bold", pad=16)
+        ps.style_axes(ax, yticks, tick_labelsize=24, xtick_labelsize=26)
+
+        ax.legend(
+            fontsize=20, frameon=True, fancybox=False, edgecolor="gray",
+            loc="upper center", ncol=5, borderpad=0.4, bbox_to_anchor=(0.5, 1.0),
+            columnspacing=1.0, handletextpad=0.4, handlelength=1.6,
+        )
 
         out_path = self.figs_dir / "exp1_precision_at_k.png"
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
+        ps.save_paper_figure(fig, out_path)
         logger.info(f"  Precision@K saved to {out_path}")
         return out_path
 

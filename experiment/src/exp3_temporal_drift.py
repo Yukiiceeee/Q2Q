@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from experiment.src.experiment_base import ExperimentBase
+from experiment.src import plot_style as ps
 
 logger = logging.getLogger(__name__)
 
@@ -27,28 +28,10 @@ DATE_FORMATS = [
     "%m/%d/%Y",
 ]
 
-METHOD_KEYS = ["q2q", "q2p", "q2n", "q2r", "q2c"]
-METHOD_COLORS = {
-    "q2q": "#2196F3",
-    "q2p": "#9C27B0",
-    "q2n": "#E91E63",
-    "q2r": "#009688",
-    "q2c": "#FF9800",
-}
-METHOD_LABELS = {
-    "q2q": "Q2Q",
-    "q2p": "Q2P",
-    "q2n": "Q2N",
-    "q2r": "Q2R",
-    "q2c": "Q2C",
-}
-METHOD_MARKERS = {
-    "q2q": "o",
-    "q2p": "D",
-    "q2n": "^",
-    "q2r": "v",
-    "q2c": "s",
-}
+METHOD_KEYS = ps.METHOD_ORDER
+METHOD_COLORS = ps.METHOD_COLORS
+METHOD_LABELS = ps.METHOD_LABELS
+METHOD_MARKERS = ps.METHOD_MARKERS
 
 
 class Exp3TemporalDrift(ExperimentBase):
@@ -303,92 +286,114 @@ class Exp3TemporalDrift(ExperimentBase):
         fig_paths["rank_drift"] = self._plot_rank_drift(valid)
         return fig_paths
 
-    def _plot_rank_vs_pool(self, results: list[dict]) -> Path:
-        pools = [r["pool_size"] for r in results]
+    def _plot_lines(
+        self,
+        pools: list[int],
+        series: dict[str, list[float]],
+        *,
+        ylabel: str,
+        title: str,
+        out_name: str,
+        ylim: tuple[float, float] | None = None,
+        yticks=None,
+        zero_line: bool = False,
+    ) -> Path:
+        """Draw one five-method line chart in the paper's line-chart style.
 
-        fig, ax = plt.subplots(figsize=(12, 7))
+        All three checkpoint plots differ only in the series they show and
+        their axis labels, so the drawing lives here once.
+        """
+        import matplotlib.patheffects as pe
+
+        flat = [v for vals in series.values() for v in vals]
+        if yticks is None:
+            yticks = ps.auto_ticks(min(flat), max(flat))
+        if ylim is None:
+            # Keep roughly a fifth of the span clear above the highest point so
+            # the legend never sits on a line -- but only extend past the top
+            # tick when the rounded range does not already provide it.
+            span = yticks[-1] - yticks[0]
+            top = max(yticks[-1], max(flat) + 0.22 * span)
+            ylim = (yticks[0] - 0.02 * span, top)
+
+        ps.use_paper_style()
+        fig, ax = plt.subplots(figsize=(12, 7), dpi=150)
+
+        if zero_line:
+            ax.axhline(0, color="#555555", linestyle="-", linewidth=1.0, alpha=0.6, zorder=2)
+
         for m in METHOD_KEYS:
-            key = f"mean_rank_{m}"
-            vals = [r.get(key, 0) for r in results]
+            # Q2Q is the proposed method: a heavier stroke picks it out of the
+            # bundle. Emphasis has to come from the line itself, not from a
+            # fill under it, because the three charts span very different
+            # ranges and a fill would swamp the one where Q2Q sits high.
+            is_main = m == "q2q"
+            lw = 3.6 if is_main else 2.6
             ax.plot(
-                pools, vals,
-                f"{METHOD_MARKERS[m]}-",
-                color=METHOD_COLORS[m],
-                linewidth=2, markersize=6,
-                label=f"{METHOD_LABELS[m]} Mean Rank",
+                pools, series[m],
+                color=METHOD_COLORS[m], linewidth=lw,
+                marker=METHOD_MARKERS[m], markersize=11 if is_main else 10,
+                markerfacecolor="white", markeredgecolor=METHOD_COLORS[m],
+                markeredgewidth=2.6 if is_main else 2.1, label=METHOD_LABELS[m],
+                zorder=6 if is_main else 5,
+                path_effects=[pe.Stroke(linewidth=lw + 1.8, foreground="white"), pe.Normal()],
             )
 
-        ax.set_xlabel("Number of Sessions in Pool", fontsize=12)
-        ax.set_ylabel("Mean Rank (lower is better)", fontsize=12)
-        ax.set_title("Retrieval Rank vs Memory Pool Size (5 Methods)", fontsize=14)
-        ax.legend(fontsize=10)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
+        ax.set_xlabel("Number of Sessions in Pool", fontsize=28, fontweight="bold", labelpad=10)
+        ax.set_ylabel(ylabel, fontsize=28, fontweight="bold", labelpad=12)
+        ax.set_title(title, fontsize=28, fontweight="bold", pad=16)
+        ax.set_ylim(*ylim)
+        ax.set_yticks(yticks)
+        ax.set_xlim(min(pools) - 10, max(pools) + 10)
+        ps.style_axes(ax, yticks, tick_labelsize=24, xtick_labelsize=24)
 
-        out_path = self.figs_dir / "exp3_rank_vs_pool.png"
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"  Rank vs pool saved to {out_path}")
+        ax.legend(
+            fontsize=21, frameon=True, fancybox=False, edgecolor="gray",
+            loc="upper center", ncol=5, bbox_to_anchor=(0.5, 1.0),
+            borderpad=0.45, columnspacing=1.1, handletextpad=0.45, handlelength=2.2,
+        )
+
+        out_path = self.figs_dir / out_name
+        ps.save_paper_figure(fig, out_path)
+        logger.info(f"  {title} saved to {out_path}")
         return out_path
+
+    def _plot_rank_vs_pool(self, results: list[dict]) -> Path:
+        pools = [r["pool_size"] for r in results]
+        series = {m: [r.get(f"mean_rank_{m}", 0) for r in results] for m in METHOD_KEYS}
+        return self._plot_lines(
+            pools, series,
+            ylabel="Mean Rank",
+            title="Retrieval Rank vs Memory Pool Size",
+            out_name="exp3_rank_vs_pool.png",
+        )
 
     def _plot_mrr_vs_pool(self, results: list[dict]) -> Path:
         pools = [r["pool_size"] for r in results]
-
-        fig, ax = plt.subplots(figsize=(12, 7))
-        for m in METHOD_KEYS:
-            key = f"mrr_{m}"
-            vals = [r.get(key, 0) for r in results]
-            ax.plot(
-                pools, vals,
-                f"{METHOD_MARKERS[m]}-",
-                color=METHOD_COLORS[m],
-                linewidth=2, markersize=6,
-                label=f"{METHOD_LABELS[m]} MRR",
-            )
-
-        ax.set_xlabel("Number of Sessions in Pool", fontsize=12)
-        ax.set_ylabel("MRR (higher is better)", fontsize=12)
-        ax.set_title("Mean Reciprocal Rank vs Memory Pool Size (5 Methods)", fontsize=14)
-        ax.legend(fontsize=10)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(0, 1.05)
-        plt.tight_layout()
-
-        out_path = self.figs_dir / "exp3_mrr_vs_pool.png"
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"  MRR vs pool saved to {out_path}")
-        return out_path
+        series = {m: [r.get(f"mrr_{m}", 0) for r in results] for m in METHOD_KEYS}
+        yticks = np.arange(0, 1.01, 0.2)
+        return self._plot_lines(
+            pools, series,
+            ylabel="MRR",
+            title="Mean Reciprocal Rank vs Memory Pool Size",
+            out_name="exp3_mrr_vs_pool.png",
+            yticks=yticks,
+        )
 
     def _plot_rank_drift(self, results: list[dict]) -> Path:
         pools = [r["pool_size"] for r in results]
-
-        fig, ax = plt.subplots(figsize=(12, 7))
+        series = {}
         for m in METHOD_KEYS:
             key = f"mean_rank_{m}"
             base = results[0].get(key, 0)
-            drift = [r.get(key, 0) - base for r in results]
-            ax.plot(
-                pools, drift,
-                f"{METHOD_MARKERS[m]}-",
-                color=METHOD_COLORS[m],
-                linewidth=2, markersize=6,
-                label=f"{METHOD_LABELS[m]} Rank Drift",
-            )
-
-        ax.axhline(0, color="black", linestyle="-", linewidth=0.8, alpha=0.5)
-        ax.set_xlabel("Number of Sessions in Pool", fontsize=12)
-        ax.set_ylabel("Rank Drift (relative to first checkpoint)", fontsize=12)
-        ax.set_title("Rank Drift as Memory Pool Grows (5 Methods)", fontsize=14)
-        ax.legend(fontsize=10)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-
-        out_path = self.figs_dir / "exp3_rank_drift.png"
-        fig.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close(fig)
-        logger.info(f"  Rank drift saved to {out_path}")
-        return out_path
+            series[m] = [r.get(key, 0) - base for r in results]
+        return self._plot_lines(
+            pools, series,
+            ylabel="Rank Drift",
+            title="Rank Drift as Memory Pool Grows",
+            out_name="exp3_rank_drift.png",
+            zero_line=True,
+        )
 
     # ------------------------------------------------------------------ #
     #  Console Summary                                                   #
