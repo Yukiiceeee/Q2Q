@@ -2,7 +2,10 @@
 
 dataset:
   name: "locomo"
-  path: "<DATA_DIR>/locomo/data/locomo10.json"
+  # Path relative to the dataset root: <project_root>/data, or DATA_DIR when
+  # set. LoCoMo is CC BY-NC 4.0 and is NOT redistributed here -- see README
+  # for how to fetch it into this layout.
+  path: "locomo/data/locomo10.json"
   format: "multi_speaker_sessions"
   # Evidence format: "D{session}:{turn}" e.g. "D1:3" = session_1, turn 3
   # Categories: 1=factual, 2=temporal, 3=reasoning, 4=multi-hop, 5=summary

@@ -95,6 +95,14 @@ DEFAULT_MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "10"))
 DEFAULT_RETRY_MIN_DELAY = float(os.environ.get("LLM_RETRY_MIN_DELAY", "10.0"))
 DEFAULT_RETRY_MAX_DELAY = float(os.environ.get("LLM_RETRY_MAX_DELAY", "20.0"))
 
+# Streaming is the default transport. A blocking completion makes the gateway
+# buffer the whole generation before it answers, which is what turns a long
+# answer into server-side memory pressure and makes the read timeout fire on a
+# request that was progressing fine. Set LLM_STREAM=false to fall back.
+DEFAULT_STREAM = os.environ.get("LLM_STREAM", "true").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+
 logger = logging.getLogger(__name__)
 
 class LLMAPIError(Exception):
@@ -115,10 +123,21 @@ def _is_retryable_exception(exc: Exception) -> Tuple[bool, str]:
     retryable_types = {
         "RateLimitError", "APIConnectionError", "APITimeoutError",
         "InternalServerError", "ServiceUnavailableError", "OverloadedError",
+        # Streaming moves the failure surface from "the request raised" to
+        # "the connection died halfway through the response body", which
+        # arrives as an httpx transport error carrying none of the keywords
+        # the message scan below looks for.
+        "RemoteProtocolError", "StreamClosed", "StreamError",
+        "ReadError", "ReadTimeout", "WriteError",
+        "ConnectError", "ConnectTimeout",
+        "ChunkedEncodingError", "IncompleteRead", "_IncompleteStreamError",
     }
 
     if exc_type in retryable_types:
         return True, f"Retryable exception type: {exc_type}"
+
+    if "incomplete chunked read" in exc_message or "peer closed connection" in exc_message:
+        return True, "Transient stream transport failure: peer closed mid-stream"
 
     retryable_keywords = [
         "rate limit", "rate_limit", "too many requests",
@@ -204,12 +223,97 @@ class LLMResponse:
     raw_response: Any = None
 
 
+@dataclass
+class _StreamedCompletion:
+    """What a consumed stream yields, in the shape a blocking call returns."""
+    content: str = ""
+    finish_reason: Optional[str] = None
+    refusal: Optional[str] = None
+    usage: Any = None
+
+
+def _apply_stream_params(params: Dict[str, Any]) -> None:
+    """Turn a chat-completions param dict into a streaming one.
+
+    ``include_usage`` is not optional here: without it the gateway sends no
+    usage block at all and every token figure in a run's results would read
+    zero, which is worse than the blocking call this replaces. A caller that
+    already supplied stream_options keeps its own.
+    """
+    params["stream"] = True
+    params.setdefault("stream_options", {"include_usage": True})
+
+
+class _IncompleteStreamError(RuntimeError):
+    """A stream that ended without the provider ever saying why."""
+
+
+async def _consume_stream(stream) -> _StreamedCompletion:
+    """Collapse a streamed completion into its final fields.
+
+    The usage block arrives in a trailing chunk that carries no choices, and
+    some gateways repeat finish_reason, so both are tracked across the whole
+    stream rather than read off any single chunk.
+    """
+    result = _StreamedCompletion()
+    parts: List[str] = []
+
+    async for chunk in stream:
+        if getattr(chunk, "usage", None):
+            result.usage = chunk.usage
+        choices = getattr(chunk, "choices", None)
+        if not choices:
+            continue
+        choice = choices[0]
+        delta = getattr(choice, "delta", None)
+        if delta is not None:
+            if getattr(delta, "content", None):
+                parts.append(delta.content)
+            if getattr(delta, "refusal", None):
+                result.refusal = delta.refusal
+        if getattr(choice, "finish_reason", None):
+            result.finish_reason = choice.finish_reason
+
+    result.content = "".join(parts)
+    if result.finish_reason is None and result.content:
+        # A blocking call cannot produce this: the response is either complete
+        # or it raises. A stream can end mid-answer and look clean to the
+        # iterator, which would hand back a silently truncated answer. Raising
+        # routes it through the retry path like any other transport fault.
+        raise _IncompleteStreamError(
+            f"stream ended after {len(result.content)} chars with no finish_reason"
+        )
+    return result
+
+
 class BaseLLMClient:
     def __init__(self, model: str, temperature: float = 1.0, max_tokens: int = 2000, **kwargs):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.stream = bool(kwargs.get("stream", DEFAULT_STREAM))
         self._tokenizer: TokenizerProtocol = get_tokenizer(model_name=model, prefer_local=True)
+
+    def _token_counts(
+        self,
+        usage: Any,
+        messages: List[Dict[str, str]],
+        content: str,
+    ) -> Tuple[int, int]:
+        """Read token counts off the usage block, estimating only if absent.
+
+        A gateway that drops the usage block would otherwise report zero tokens
+        for the whole run; a local estimate is approximate but keeps the cost
+        and efficiency figures in the results interpretable.
+        """
+        if usage is not None:
+            return usage.prompt_tokens or 0, usage.completion_tokens or 0
+        logger.warning(
+            "[%s] Response carried no usage block; falling back to local token "
+            "estimates for this call.", type(self).__name__
+        )
+        prompt = sum(self.count_tokens(m.get("content") or "") for m in messages)
+        return prompt, self.count_tokens(content)
 
     async def chat(
         self,
@@ -276,6 +380,7 @@ class OpenAIClient(BaseLLMClient):
         **kwargs
     ) -> LLMResponse:
         start_time = time.time()
+        use_stream = bool(kwargs.pop("stream", self.stream))
         params = {
             "model": self.model,
             "messages": messages,
@@ -288,26 +393,40 @@ class OpenAIClient(BaseLLMClient):
             params["max_tokens"] = token_limit
         params.update(kwargs)
 
-        response = await self.client.chat.completions.create(**params)
-        latency = time.time() - start_time
+        if use_stream:
+            _apply_stream_params(params)
+            streamed = await _consume_stream(
+                await self.client.chat.completions.create(**params)
+            )
+            content = streamed.content
+            finish_reason = streamed.finish_reason
+            refusal = streamed.refusal
+            usage = streamed.usage
+            raw_response = None
+        else:
+            response = await self.client.chat.completions.create(**params)
+            content = response.choices[0].message.content or ""
+            finish_reason = response.choices[0].finish_reason
+            refusal = getattr(response.choices[0].message, 'refusal', None)
+            usage = response.usage
+            raw_response = response
 
-        content = response.choices[0].message.content or ""
-        finish_reason = response.choices[0].finish_reason
-        refusal = getattr(response.choices[0].message, 'refusal', None)
+        latency = time.time() - start_time
 
         if not content.strip():
             logger.warning(
                 f"[OpenAIClient] Empty response - finish_reason={finish_reason}, "
-                f"refusal={refusal}, model={self.model}"
+                f"refusal={refusal}, model={self.model}, stream={use_stream}"
             )
 
+        input_tokens, output_tokens = self._token_counts(usage, messages, content)
         llm_response = LLMResponse(
             content=content,
-            input_tokens=response.usage.prompt_tokens if response.usage else 0,
-            output_tokens=response.usage.completion_tokens if response.usage else 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             latency=latency,
             model=self.model,
-            raw_response=response,
+            raw_response=raw_response,
         )
         get_usage_tracker().record(llm_response)
         return llm_response
@@ -343,6 +462,7 @@ class AzureOpenAIClient(BaseLLMClient):
         **kwargs
     ) -> LLMResponse:
         start_time = time.time()
+        use_stream = bool(kwargs.pop("stream", self.stream))
         params = {
             "model": self.deployment,
             "messages": messages,
@@ -355,26 +475,40 @@ class AzureOpenAIClient(BaseLLMClient):
             params["max_tokens"] = token_limit
         params.update(kwargs)
 
-        response = await self.client.chat.completions.create(**params)
-        latency = time.time() - start_time
+        if use_stream:
+            _apply_stream_params(params)
+            streamed = await _consume_stream(
+                await self.client.chat.completions.create(**params)
+            )
+            content = streamed.content
+            finish_reason = streamed.finish_reason
+            refusal = streamed.refusal
+            usage = streamed.usage
+            raw_response = None
+        else:
+            response = await self.client.chat.completions.create(**params)
+            content = response.choices[0].message.content or ""
+            finish_reason = response.choices[0].finish_reason
+            refusal = getattr(response.choices[0].message, 'refusal', None)
+            usage = response.usage
+            raw_response = response
 
-        content = response.choices[0].message.content or ""
-        finish_reason = response.choices[0].finish_reason
-        refusal = getattr(response.choices[0].message, 'refusal', None)
+        latency = time.time() - start_time
 
         if not content.strip():
             logger.warning(
                 f"[AzureOpenAIClient] Empty response - finish_reason={finish_reason}, "
-                f"refusal={refusal}, model={self.deployment}"
+                f"refusal={refusal}, model={self.deployment}, stream={use_stream}"
             )
 
+        input_tokens, output_tokens = self._token_counts(usage, messages, content)
         llm_response = LLMResponse(
             content=content,
-            input_tokens=response.usage.prompt_tokens if response.usage else 0,
-            output_tokens=response.usage.completion_tokens if response.usage else 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             latency=latency,
             model=self.deployment,
-            raw_response=response,
+            raw_response=raw_response,
         )
         get_usage_tracker().record(llm_response)
         return llm_response

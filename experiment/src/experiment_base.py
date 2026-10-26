@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from src.paths import models_dir, resolve
 from experiment.embedding import create_embedding_provider, BaseEmbedding
 from experiment.store import EmbeddingStore
 from experiment.src.data_loader import BaseDataLoader, load_dataset
@@ -26,6 +27,7 @@ class ExperimentBase(ABC):
         self.base_config = self._load_yaml(config_path)
         self.dataset_config = self._load_yaml(dataset_config_path)
         self._merge_env_vars()
+        self._resolve_model_path()
 
         self.embedding_provider: BaseEmbedding = create_embedding_provider(
             provider=self.base_config["embedding"]["provider"],
@@ -121,9 +123,25 @@ class ExperimentBase(ABC):
             llm["base_url"] = os.environ.get("OPENAI_BASE_URL", "")
 
         emb = self.base_config.get("embedding", {})
+        # The config wins here, deliberately. An experiment pins the encoder it
+        # was designed around, while DEFAULT_EMBEDDING_MODEL in a developer's
+        # .env configures the agent and may well name a different model.
         if not emb.get("model_name"):
             emb["model_name"] = os.environ.get("DEFAULT_EMBEDDING_MODEL", "")
         if not emb.get("api_key"):
             emb["api_key"] = os.environ.get("OPENAI_API_KEY", "")
         if not emb.get("base_url"):
             emb["base_url"] = os.environ.get("OPENAI_BASE_URL", "")
+
+    def _resolve_model_path(self) -> None:
+        """Turn a bare local-embedding model name into a usable path.
+
+        Configs carry only the directory name (e.g. "bge-large-en-v1.5") so
+        that nothing in this repo is tied to one machine's filesystem. The name
+        is resolved under <project_root>/models, which MODELS_DIR redirects.
+        A value that is already absolute passes through untouched.
+        """
+        emb = self.base_config.get("embedding", {})
+        if emb.get("provider") != "local" or not emb.get("model_name"):
+            return
+        emb["model_name"] = str(resolve(emb["model_name"], root=models_dir()))

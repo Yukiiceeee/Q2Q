@@ -5,6 +5,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src.paths import model_path
+
 
 @dataclass
 class LLMConfig:
@@ -112,13 +114,16 @@ class Q2QConfig:
         config.embedding.model_name = os.getenv("DEFAULT_EMBEDDING_MODEL", "")
         config.embedding.device = os.getenv("EMBEDDING_DEVICE", "cpu")
 
+        # Model defaults resolve under <project_root>/models, which MODELS_DIR
+        # redirects to a shared cache. Never hardcode an absolute path here:
+        # it only works on the machine it was written on.
         config.preprocessing.compressor_model = os.getenv(
-            "COMPRESSOR_MODEL", "<MODELS_DIR>/Qwen2.5-0.5B-Instruct"
+            "COMPRESSOR_MODEL", model_path("Qwen2.5-0.5B-Instruct")
         )
         config.preprocessing.compressor_device = os.getenv("COMPRESSOR_DEVICE", "cpu")
         config.preprocessing.proposition_mode = os.getenv("PROPOSITION_MODE", "llm")
         config.preprocessing.nlp_inference_model = os.getenv(
-            "NLP_INFERENCE_MODEL", "<MODELS_DIR>/flan-t5-large"
+            "NLP_INFERENCE_MODEL", model_path("flan-t5-large")
         )
 
         config.storage.chromadb_path = os.getenv("STORAGE_CHROMADB_PATH", "data/chromadb")

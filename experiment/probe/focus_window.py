@@ -18,10 +18,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from src.config import Q2QConfig
 from src.embedding.factory import create_embedding_provider
+from src.paths import dataset_path
 from src.retrieval.answerer import Answerer
 from src.schemas.models import SubQuery
 
-AMA = "<DATA_DIR>/AMA-Hub/dataset/test/open_end_qa_set.jsonl"
+# Path relative to the dataset root (<project_root>/data, or DATA_DIR). AMA-Hub
+# is not redistributed with this repository; see README for how to fetch it.
+AMA = str(dataset_path("AMA-Hub/dataset/test/open_end_qa_set.jsonl"))
 BUDGET = int(os.getenv("PROBE_BUDGET", "10000"))
 N_EP = int(sys.argv[1]) if len(sys.argv) > 1 else 4
 ID = re.compile(r"\[\d+\]")

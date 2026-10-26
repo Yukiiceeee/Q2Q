@@ -1,3 +1,8 @@
+// Figure directory, relative to experiment/web/index.html. This used to be a
+// `figs -> ../figs/locomo` symlink, which a Windows clone checks out as a
+// plain text file and every image 404s. A relative URL needs no symlink.
+const FIGS_BASE = '../figs/locomo/';
+
 const DATA = {
   meta: {
     dataset: 'LoCoMo',

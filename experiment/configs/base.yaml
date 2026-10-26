@@ -10,7 +10,11 @@ llm:
 
 embedding:
   provider: "local"  # "local" or "api"
-  model_name: "<MODELS_DIR>/bge-large-en-v1.5"     # loaded from env DEFAULT_EMBEDDING_MODEL
+  # Model directory name, resolved under <project_root>/models (point the root
+  # elsewhere with the MODELS_DIR env var). Absolute paths also work but are
+  # not portable, so keep this relative. The experiment pins its encoder here
+  # on purpose; DEFAULT_EMBEDDING_MODEL only applies if this is left empty.
+  model_name: "bge-large-en-v1.5"
   device: "cpu"
   dimension: 1024
   max_seq_length: 512

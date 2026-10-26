@@ -455,8 +455,8 @@
       const container = document.getElementById(containerId);
       if (!container) return;
       container.innerHTML = figures.map(fig => `
-        <div class="figure-card" onclick="openLightbox('figs/${fig.file}', '${fig.title}')">
-          <img src="figs/${fig.file}" alt="${fig.title}" loading="lazy">
+        <div class="figure-card" onclick="openLightbox('${FIGS_BASE}${fig.file}', '${fig.title}')">
+          <img src="${FIGS_BASE}${fig.file}" alt="${fig.title}" loading="lazy">
           <div class="caption">${fig.title}</div>
         </div>
       `).join('');

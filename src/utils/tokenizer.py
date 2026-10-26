@@ -60,9 +60,10 @@ class CharEstimationTokenizer:
         return ""
 
 
-# Default local models directory (configurable via MODELS_DIR env var)
-_PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-DEFAULT_MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(_PROJECT_ROOT / "models")))
+# Default local models directory. Resolved through src.paths so that this and
+# src.config agree on one root, and so MODELS_DIR is honoured even when it is
+# set by a .env file loaded after this module is imported.
+from src.paths import models_dir as _models_dir
 
 # Tokenizer model mapping
 # key: model family, value: (local dir name, tiktoken encoding, HuggingFace model name)
@@ -90,7 +91,7 @@ def get_tokenizer(
     prefer_local: bool = True,
 ) -> TokenizerProtocol:
     """Get tokenizer instance. Priority: local model > tiktoken > char estimation."""
-    models_dir = local_models_dir or DEFAULT_MODELS_DIR
+    models_dir = local_models_dir or _models_dir()
 
     # Find config by model name
     model_key = "default"

@@ -46,14 +46,18 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent import Q2QAgent  # noqa: E402
 from src.config import Q2QConfig  # noqa: E402
+from src.paths import model_path  # noqa: E402
 from src.utils.llm_client import get_usage_tracker  # noqa: E402
 from experiment.probe import locomo_data  # noqa: E402
 
 logger = logging.getLogger("probe.build")
 
-DEFAULT_EMBEDDING = "<MODELS_DIR>/bge-small-en-v1.5"
-DEFAULT_COMPRESSOR = "<MODELS_DIR>/Qwen2.5-0.5B-Instruct"
-DEFAULT_NLP_MODEL = "<MODELS_DIR>/flan-t5-large"
+# Model defaults are names under <project_root>/models, resolved at call time
+# so MODELS_DIR can redirect them to a shared cache. Relative-only by design:
+# an absolute default would break on every machine but the author's.
+DEFAULT_EMBEDDING = model_path("bge-small-en-v1.5")
+DEFAULT_COMPRESSOR = model_path("Qwen2.5-0.5B-Instruct")
+DEFAULT_NLP_MODEL = model_path("flan-t5-large")
 
 # locomo_small.yaml: evaluation.memory_chunk_size
 LOCOMO_CHUNK_SIZE = 10240

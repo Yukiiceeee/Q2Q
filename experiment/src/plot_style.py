@@ -8,6 +8,10 @@ grey bands and the small dots on the y axis.
 The method palette is the single source of truth for colour: the same hue means
 the same method everywhere, including the t-SNE panels, so a reader can carry
 Q2Q's colour from one figure to the next.
+
+Two axis looks live here. ``style_axes`` is the full-width bar-chart look;
+``style_line_panel`` is the narrow multi-curve look used by the single-column
+line panels. See the comment above the latter for when each applies.
 """
 from __future__ import annotations
 
@@ -69,6 +73,79 @@ EMBED_COLORS = {
 
 BAND_COLOR = "#CCCCCC"
 GRID_COLOR = "#999999"
+
+# --------------------------------------------------------------------------- #
+# Muted line-panel look
+# --------------------------------------------------------------------------- #
+# A second visual language, for the narrow multi-curve line panels that go into
+# a single paper column. ``style_axes`` above is built for full-width bar charts
+# -- its alternating bands and heavy ticks crowd a panel this small -- so these
+# panels instead get an open L frame, a light grid in both directions and long
+# rounded dashes. Colour is deliberately *not* fixed here: each figure brings
+# its own palette so two such panels sitting on the same page stay telling
+# apart, while the frame, grid, dash pattern and type scale keep them a family.
+
+LINE_GRID_COLOR = "#E4E8E8"
+LINE_AXIS_COLOR = "#A9B7B5"
+# Titles, axis labels and ticks are plain black Times New Roman at regular
+# weight, no tinting, matching the exp4/exp5 line charts.
+LINE_LABEL_COLOR = "black"
+LINE_DASH = (0, (5.5, 2.2))
+
+# Type scale. The title and the x label sit a step below the y label: they name
+# a constant each (the dataset, the swept knob) while the y label names the
+# quantity being read off.
+PANEL_TITLE_SIZE = 14.0
+PANEL_XLABEL_SIZE = 13.0
+PANEL_YLABEL_SIZE = 14.5
+PANEL_TICK_SIZE = 12.5
+PANEL_XTICK_SIZE = 13.0
+PANEL_LEGEND_SIZE = 12.0
+
+
+def style_line_panel(
+    ax,
+    *,
+    tick_labelsize: float = PANEL_TICK_SIZE,
+    xtick_labelsize: float = PANEL_XTICK_SIZE,
+) -> None:
+    """Open L frame: the two value axes are drawn, the opposite pair is not.
+
+    Tick *positions* stay the caller's business -- this only sets the frame,
+    the grid and the tick cosmetics, so a categorical and a numeric panel can
+    share the look without sharing a scale.
+    """
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("bottom", "left"):
+        ax.spines[side].set_visible(True)
+        ax.spines[side].set_color(LINE_AXIS_COLOR)
+        ax.spines[side].set_linewidth(1.1)
+
+    ax.grid(True, color=LINE_GRID_COLOR, linewidth=0.9, zorder=0)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis="both", length=3.5, width=1.1, color=LINE_AXIS_COLOR,
+                   labelcolor=LINE_LABEL_COLOR, labelsize=tick_labelsize, pad=4)
+    ax.tick_params(axis="x", labelsize=xtick_labelsize)
+
+
+def line_panel_handles(series: Sequence[dict]) -> list:
+    """Proxy artists for a legend drawn in the muted line-panel look.
+
+    Each entry needs ``color``, ``marker`` and ``label``; ``highlight`` thickens
+    the line and enlarges the marker, as it does on the panel itself.
+    """
+    return [
+        Line2D(
+            [0], [0], color=s["color"],
+            linewidth=2.6 if s.get("highlight") else 2.1,
+            linestyle=LINE_DASH, dash_capstyle="round", marker=s["marker"],
+            markersize=8.0 if s.get("highlight") else 6.4,
+            markerfacecolor=s["color"], markeredgecolor="white",
+            markeredgewidth=0.9, label=s["label"],
+        )
+        for s in series
+    ]
 
 
 def use_paper_style() -> None:

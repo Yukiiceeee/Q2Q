@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
+from src.paths import dataset_path
+
 # Category id -> name, from LOCOMO_CATEGORY_MAPPING.
 CATEGORY_NAMES: dict[int, str] = {
     1: "multi_hop",
@@ -32,9 +34,9 @@ CATEGORY_NAMES: dict[int, str] = {
     5: "adversarial",
 }
 
-DEFAULT_DATA_FILE = (
-    "<DATA_DIR>/locomo/data/locomo10.json"
-)
+# Path relative to the dataset root (<project_root>/data, or DATA_DIR). LoCoMo
+# is not redistributed with this repository; see README for how to fetch it.
+DEFAULT_DATA_FILE = str(dataset_path("locomo/data/locomo10.json"))
 
 
 @dataclass

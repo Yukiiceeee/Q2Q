@@ -14,7 +14,19 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.paths import data_dir, resolve
+
 logger = logging.getLogger(__name__)
+
+
+def _dataset_file(config: dict) -> Path:
+    """Resolve ``dataset.path`` from a config against the dataset root.
+
+    Configs carry paths relative to <project_root>/data (or DATA_DIR) so the
+    repo stays machine-independent; an absolute path is honoured unchanged for
+    operators who keep their corpora elsewhere.
+    """
+    return resolve(config["path"], root=data_dir())
 
 
 @dataclass
@@ -75,7 +87,7 @@ class BaseDataLoader(ABC):
 class LoCoMoLoader(BaseDataLoader):
 
     def load(self) -> None:
-        path = Path(self.config["path"])
+        path = _dataset_file(self.config)
         with open(path, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
 
@@ -161,7 +173,7 @@ class LoCoMoLoader(BaseDataLoader):
 class LongMemEvalLoader(BaseDataLoader):
 
     def load(self) -> None:
-        path = Path(self.config["path"])
+        path = _dataset_file(self.config)
         with open(path, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
 

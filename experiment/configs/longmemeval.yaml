@@ -2,7 +2,10 @@
 
 dataset:
   name: "longmemeval"
-  path: "<DATA_DIR>/LongMemEval/data/longmemeval-cleaned/longmemeval_s_cleaned.json"
+  # Path relative to the dataset root: <project_root>/data, or DATA_DIR when
+  # set. LongMemEval is NOT redistributed here -- see README for how to fetch
+  # it into this layout.
+  path: "LongMemEval/data/longmemeval-cleaned/longmemeval_s_cleaned.json"
   format: "haystack_sessions"
   # Structure: question + answer + answer_session_ids + haystack_sessions (multi-turn dialogues)
   # Question types: single-session-user, multi-session, temporal-reasoning, knowledge-update, etc.

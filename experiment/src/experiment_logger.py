@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 logger = logging.getLogger(__name__)
 
@@ -14,15 +14,29 @@ logger = logging.getLogger(__name__)
 # never persists an API key or an internal endpoint into the result log.
 _REDACTED_KEYS = {"api_key", "base_url", "token", "secret", "password"}
 
+# Absolute paths leak the author's filesystem layout and username into every
+# committed result file, and mean nothing to anyone reproducing the run. Keep
+# only the trailing component, which is the part that identifies the asset.
+_PATH_KEYS = {"model_name", "model", "path", "data_file", "base_dir", "results_dir"}
 
-def _redact(obj):
+
+def _shorten_path(value):
+    """Reduce an absolute path to its final component; leave anything else alone."""
+    if isinstance(value, str) and value.startswith("/") and "/" in value[1:]:
+        return PurePosixPath(value).name
+    return value
+
+
+def _redact(obj, key: str | None = None):
     if isinstance(obj, dict):
         return {
-            k: ("***" if k in _REDACTED_KEYS and obj[k] else _redact(v))
+            k: ("***" if k in _REDACTED_KEYS and obj[k] else _redact(v, k))
             for k, v in obj.items()
         }
     if isinstance(obj, list):
-        return [_redact(v) for v in obj]
+        return [_redact(v, key) for v in obj]
+    if key in _PATH_KEYS:
+        return _shorten_path(obj)
     return obj
 
 
