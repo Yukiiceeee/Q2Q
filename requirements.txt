@@ -23,6 +23,13 @@ transformers>=4.35.0
 # Vector store
 chromadb>=0.4.0
 
-# Optional LLM backend. `anthropic` is imported lazily inside AnthropicClient,
-# so it is only needed when LLM_PROVIDER=anthropic. Uncomment to enable:
+# Optional extras. Both are imported lazily, on the code path that needs them,
+# so the default configuration runs without either. Uncomment what you use.
+#
+#   LLM_PROVIDER=anthropic
 # anthropic>=0.20.0
+#
+#   PROPOSITION_MODE=nlp
+#   T5Tokenizer is the SentencePiece-backed slow tokenizer, and transformers
+#   raises at load time without this package.
+# sentencepiece>=0.1.99

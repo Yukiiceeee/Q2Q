@@ -1,0 +1,38 @@
+# Exact versions of the direct dependencies, as verified on the machine that
+# produced the reported results. The floors in requirements.txt say what the
+# code needs; this file says what it was actually run with.
+#
+# Use this when reproducing numbers, where a silent upgrade across a major
+# release of transformers, numpy, or chromadb would change behaviour:
+#
+#     python -m venv .venv && . .venv/bin/activate
+#     pip install -r requirements-lock.txt
+#
+# Verified on Python 3.10.16. Transitive dependencies are deliberately left
+# unpinned: pinning them would bake in platform-specific wheels (notably for
+# torch) and make this file unusable off macOS/arm64.
+
+# Core
+numpy==2.2.6
+python-dotenv==1.2.2
+
+# LLM clients
+openai==2.44.0
+httpx==0.28.1
+tiktoken==0.13.0
+
+# Embedding
+sentence-transformers==5.7.0
+torch==2.13.0
+
+# Preprocessing
+transformers==5.15.0
+
+# Vector store
+chromadb==1.5.9
+
+# Experiments (experiment/)
+PyYAML==6.0.3
+matplotlib==3.10.9
+scipy==1.15.3
+scikit-learn==1.7.2

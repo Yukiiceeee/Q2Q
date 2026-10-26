@@ -1,126 +1,166 @@
 # Q2Q: Query-to-Query Agent Memory System
 
-基于假想查询生成与双路联合检索的 Agent 记忆系统。
+An agent memory system built on anchor-query generation and dual-path joint retrieval.
 
-## 核心思路
+## Approach
 
-- **记忆构建阶段**：对每轮会话生成假想查询（Fake Queries），构建 query→memory 索引
-- **查询问答阶段**：将用户查询分解为子查询，与假想查询做 Q2Q + Q2C 双路相似度检索
+- **Memory construction.** For each session turn, generate anchor queries (also
+  referred to as fake queries in the code) and index them as `query → memory`.
+- **Question answering.** Decompose the user query into sub-queries, then match
+  them against both the anchor queries (Q2Q) and the raw content (Q2C).
 
-## 安装
+## Installation
+
+Verified on Python 3.10.
 
 ```bash
-# 核心运行时依赖
+python -m venv .venv && source .venv/bin/activate
+
+# Core runtime
 pip install -r requirements.txt
 
-# 仅跑 experiment/ 下的分析实验时额外需要
+# Additionally, to reproduce the experiments under experiment/
 pip install -r requirements-experiment.txt
 
-# 配置环境变量
+# Configure
 cp .env.example .env
 ```
 
-## 使用
+To reproduce the reported numbers rather than just run the system, install the
+exact versions the results were produced with:
 
 ```bash
-# 记忆存储
+pip install -r requirements-lock.txt
+```
+
+`requirements.txt` declares version floors — the oldest release whose API this
+code relies on. `requirements-lock.txt` declares the versions actually used, so
+that a major release of `transformers`, `numpy`, or `chromadb` cannot silently
+change behaviour. Two extras are commented out in `requirements.txt` because
+they are imported lazily and the default configuration does not need them:
+`anthropic` (only for `LLM_PROVIDER=anthropic`) and `sentencepiece` (only for
+`PROPOSITION_MODE=nlp`, whose `T5Tokenizer` fails to load without it).
+
+Note that `tiktoken` downloads its BPE encoding on first use and caches it, so
+the first run needs network access. Set `TIKTOKEN_CACHE_DIR` to control where
+that cache lives.
+
+## Usage
+
+```bash
+# Store memory
 python main.py memorize --file data/session.txt
 
-# 查询检索
-python main.py query "患者的血糖控制情况如何？"
+# Retrieve
+python main.py query "How well is the patient's blood glucose controlled?"
 
-# 查看统计
+# Interactive session
+python main.py interactive
+
+# Statistics
 python main.py stats
 
-# 清空记忆
+# Clear memory
 python main.py clear
 ```
 
-## 资产路径约定
+## Asset path convention
 
-仓库内不写死任何绝对路径。模型与数据集的根目录由两个环境变量决定，默认指向
-项目内，可改指向共享缓存；配置文件里只写相对于这两个根的名字或路径，解析逻辑
-统一收敛在 `src/paths.py`。
+No absolute path is hardcoded anywhere in this repository. Two environment
+variables define the roots for models and datasets; both default to locations
+inside the project and can be pointed at a shared cache instead. Config files
+only ever carry names or paths relative to these roots, and all resolution is
+centralised in `src/paths.py`.
 
-| 变量 | 作用 | 默认值 |
-|------|------|--------|
-| `MODELS_DIR` | 本地模型权重根目录 | `<项目根>/models` |
-| `DATA_DIR` | 数据集根目录 | `<项目根>/data` |
+| Variable | Purpose | Default |
+|---|---|---|
+| `MODELS_DIR` | Root for local model weights | `<project_root>/models` |
+| `DATA_DIR` | Root for datasets | `<project_root>/data` |
 
-例如 `experiment/configs/base.yaml` 里的 `model_name: "bge-large-en-v1.5"`
-会解析为 `$MODELS_DIR/bge-large-en-v1.5`。已是绝对路径的值原样透传。
+For example, `model_name: "bge-large-en-v1.5"` in
+`experiment/configs/base.yaml` resolves to `$MODELS_DIR/bge-large-en-v1.5`. A
+value that is already absolute is passed through unchanged.
 
-## 数据集
+## Datasets
 
-**本仓库不分发任何数据集。** LoCoMo 采用 CC BY-NC 4.0，其 NonCommercial 限制
-会传递到由它生成的派生物（假想查询、命题、嵌入等），因此 `experiment/store/`
-作为本地构建产物被 gitignore。各数据集的获取方式、预期路径与引用格式见
-[DATASETS.md](DATASETS.md)。
+**No dataset is distributed with this repository.** LoCoMo is licensed
+CC BY-NC 4.0, and its NonCommercial restriction propagates to anything derived
+from it (anchor queries, propositions, embeddings), which is why
+`experiment/store/` is gitignored as a local build artifact. See
+[DATASETS.md](DATASETS.md) for how to obtain each corpus, the paths the configs
+expect, and citation entries.
 
-## 配置
+## Configuration
 
-通过 `.env` 文件配置，完整变量清单见 `.env.example`。关键参数：
+Configured through `.env`; see `.env.example` for the complete list.
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `LLM_PROVIDER` | LLM 提供方 (openai/anthropic/azure) | openai |
-| `DEFAULT_LLM_MODEL` | LLM 模型 | gpt-4o-mini |
-| `OPENAI_API_KEY` | LLM / 嵌入 API 密钥 | - |
-| `OPENAI_BASE_URL` | API 端点（兼容网关时填写） | - |
-| `MODELS_DIR` | 本地模型权重根目录 | `<项目根>/models` |
-| `DATA_DIR` | 数据集根目录 | `<项目根>/data` |
-| `EMBEDDING_PROVIDER` | 嵌入模式 (local/openai) | local |
-| `DEFAULT_EMBEDDING_MODEL` | 嵌入模型名（相对 `MODELS_DIR`） | - |
-| `EMBEDDING_DEVICE` | 嵌入设备 | cpu |
-| `PROPOSITION_MODE` | 命题提取模式 (llm/nlp) | llm |
-| `COMPRESSOR_MODEL` | 困惑度压缩模型名 | Qwen2.5-0.5B-Instruct |
-| `NLP_INFERENCE_MODEL` | NLP 模式推理模型名 | flan-t5-large |
-| `STORAGE_CHROMADB_PATH` | ChromaDB 持久化目录 | data/chromadb |
-| `FQ_STYLE` | 假查询表述样式 (formal/colloquial/keyword/elliptical) | formal |
-| `FQ_ROLE` | 假查询角色视角 (user/otherside) | user |
-| `Q2Q_ANCHOR_WEIGHT` | 锚点查询加权系数 | - |
-| `LOG_LEVEL` | 日志级别 | INFO |
+| Variable | Description | Default |
+|---|---|---|
+| `LLM_PROVIDER` | LLM backend (openai/anthropic/azure) | openai |
+| `DEFAULT_LLM_MODEL` | LLM model | gpt-4o-mini |
+| `OPENAI_API_KEY` | API key for LLM and embeddings | - |
+| `OPENAI_BASE_URL` | API endpoint, for compatible gateways | - |
+| `MODELS_DIR` | Root for local model weights | `<project_root>/models` |
+| `DATA_DIR` | Root for datasets | `<project_root>/data` |
+| `EMBEDDING_PROVIDER` | Embedding mode (local/openai) | local |
+| `DEFAULT_EMBEDDING_MODEL` | Embedding model name, relative to `MODELS_DIR` | - |
+| `EMBEDDING_DEVICE` | Embedding device | cpu |
+| `PROPOSITION_MODE` | Proposition extraction mode (llm/nlp) | llm |
+| `COMPRESSOR_MODEL` | Perplexity compression model | Qwen2.5-0.5B-Instruct |
+| `NLP_INFERENCE_MODEL` | Inference model for `nlp` mode | flan-t5-large |
+| `STORAGE_CHROMADB_PATH` | ChromaDB persistence directory | data/chromadb |
+| `FQ_STYLE` | Anchor-query phrasing (formal/colloquial/keyword/elliptical) | formal |
+| `FQ_ROLE` | Anchor-query perspective (user/otherside) | user |
+| `Q2Q_ANCHOR_WEIGHT` | Anchor-query weighting coefficient | - |
+| `LOG_LEVEL` | Log level | INFO |
 
-> 场景路由（dialogue / trajectory / document）由 `src/preprocessing/scene_detector.py`
-> 在记忆构建时根据文本结构自动判定，无需配置。
-> 注意：双路检索中 Q2Q 与 Q2C 结果直接合并，不存在 α 加权。
+> Scene routing (dialogue / trajectory / document) is decided automatically at
+> memory-construction time by `src/preprocessing/scene_detector.py` from the
+> structure of the text, and needs no configuration.
+>
+> Note that the two retrieval paths are merged directly: there is no α
+> weighting between Q2Q and Q2C.
 
-## 项目结构
+## Project layout
 
 ```
 Q2Q/
-├── agent.py                 # 顶层编排 (memorize/query 入口)
-├── main.py                  # CLI 入口
+├── agent.py                 # Top-level orchestration (memorize/query)
+├── main.py                  # CLI entry point
 ├── src/
-│   ├── config.py            # 全局配置
-│   ├── paths.py             # 模型/数据集路径解析（项目根相对）
-│   ├── schemas/             # 数据模型
-│   ├── prompts/             # 中英文提示词模板（含场景路由模板）
-│   ├── embedding/           # 嵌入计算 (本地/API)
-│   ├── memory/              # 记忆构建 (假想查询生成 + DAG 图管理)
-│   ├── retrieval/           # 查询检索 (分解+双路检索)
-│   ├── storage/             # 存储层 (ChromaDB)
-│   └── utils/               # LLM客户端/日志/分词器
-├── experiment/              # Motivation 分析实验（生成/嵌入/存储/实验执行）
-├── scripts/                 # 启动脚本
-├── models/                  # 本地模型权重（不入库）
-├── data/                    # 数据集（不入库）
-├── logs/                    # 日志输出
-└── outputs/                 # 评测结果输出
+│   ├── config.py            # Global configuration
+│   ├── paths.py             # Model/dataset path resolution, project-relative
+│   ├── schemas/             # Data models
+│   ├── prompts/             # Prompt templates, incl. scene-routed variants
+│   ├── embedding/           # Embedding computation (local/API)
+│   ├── memory/              # Memory construction (anchor queries + DAG)
+│   ├── retrieval/           # Retrieval (decomposition + dual path)
+│   ├── storage/             # Storage layer (ChromaDB)
+│   └── utils/               # LLM client, logging, tokenizer
+├── experiment/              # Motivation analysis (generation/embedding/store/runs)
+├── scripts/                 # Launch scripts
+├── models/                  # Local model weights (not tracked)
+├── data/                    # Datasets (not tracked)
+├── logs/                    # Log output
+└── outputs/                 # Evaluation output
 ```
 
-> 评测流程由外部 harness（MedMemoryBench `scripts/run_eval.sh`）驱动，本仓库不再内置评测入口。
+> Evaluation is driven by an external harness (MedMemoryBench
+> `scripts/run_eval.sh`); this repository no longer ships an evaluation entry
+> point.
 
-## 实验产物
+## Experiment artifacts
 
-`experiment/` 下的 `store/`、`results/`、`figs/` 均为运行时产出，不随仓库分发：
+`store/`, `results/`, and `figs/` under `experiment/` are all run output and are
+not distributed with the repository:
 
 ```bash
-python experiment/run.py          # 重新生成
-open experiment/web/index.html    # 查看结果页
+python experiment/run.py          # regenerate
+open experiment/web/index.html    # view results
 ```
 
-## 许可证
+## License
 
-代码采用 [MIT](LICENSE)。第三方数据集各自保留其原始许可，详见
-[DATASETS.md](DATASETS.md)——MIT 不覆盖、也无法覆盖这些语料。
+The code is released under the [MIT License](LICENSE). Third-party datasets
+retain their original licenses, detailed in [DATASETS.md](DATASETS.md); MIT does
+not, and cannot, cover those corpora.
