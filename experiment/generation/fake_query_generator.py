@@ -1,14 +1,29 @@
-"""Fake Query generator for experiment preprocessing.
+"""Anchor-query generator for experiment preprocessing.
 
-Directly reuses the main Q2Q project's FakeQueryGenerator to ensure
-consistency between experiment analysis and production behavior.
+Generates anchor-query candidates (``fake queries`` in the code) from session
+text alone, using the experiment-local prompts in
+``prompts/fake_query_prompt.py``.
+
+This deliberately does not call the construction path in
+``src.memory.query_generator``. That one conditions generation on extracted
+propositions and verifies every candidate against an embedding provider, so it
+returns ``FakeQuery`` objects carrying bindings. The motivation analysis needs
+the opposite: generation blind to the true query, from raw session text, and a
+plain list of query strings that ``experiment/run.py --step embed`` can hand
+straight to ``embed_batch``. Mixing the two would leak proposition-level
+supervision into a measurement that is supposed to be independent of it.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
+
+from experiment.generation.prompts.fake_query_prompt import (
+    build_experiment_fq_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +39,9 @@ class ExperimentFQGenerator:
         max_concurrent: int = 5,
         save_interval: int = 10,
     ):
-        from src.memory.query_generator import FakeQueryGenerator
-
-        self._generator = FakeQueryGenerator(
-            llm_client=llm_client,
-            num_queries=num_queries,
-            language=language,
-        )
+        self.llm_client = llm_client
+        self.num_queries = num_queries
+        self.language = language
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.max_concurrent = max_concurrent
@@ -77,7 +88,7 @@ class ExperimentFQGenerator:
             async with semaphore:
                 sid = session["session_id"]
                 text = session["text"]
-                queries = await self._generator._generate_queries(text)
+                queries = await self._generate(text)
                 completed += 1
                 if completed % self.save_interval == 0:
                     self._save_results(results, output_path)
@@ -97,6 +108,63 @@ class ExperimentFQGenerator:
         self._save_results(results, output_path)
         logger.info(f"Saved {len(results)} sessions to {output_path}")
         return results
+
+    async def _generate(self, session_text: str) -> list[str]:
+        prompt = build_experiment_fq_prompt(
+            session_text, self.num_queries, self.language
+        )
+        messages = [{"role": "user", "content": prompt}]
+        response = await self.llm_client.chat(messages, temperature=0.7)
+        return self._parse_response(response.content)
+
+    def _parse_response(self, content: str) -> list[str]:
+        content = content.strip()
+
+        parsed = self._try_json_array(content)
+        if parsed is None:
+            match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', content, re.DOTALL)
+            if match:
+                parsed = self._try_json_array(match.group(1))
+        if parsed is None:
+            match = re.search(r'\[.*\]', content, re.DOTALL)
+            if match:
+                parsed = self._try_json_array(match.group(0))
+        if parsed is None:
+            logger.warning("Failed to parse FQ response, returning empty list")
+            return []
+
+        return self._validate_queries(parsed)
+
+    def _validate_queries(self, items: list) -> list[str]:
+        """Keep non-empty strings, deduplicate, and cap at ``num_queries``.
+
+        The model is asked for exactly ``num_queries`` strings but is not bound
+        to comply. Trimming here keeps the anchor budget identical across
+        sessions, which experiment 4 relies on when it sweeps that budget.
+        """
+        queries: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            text = str(item).strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            queries.append(text)
+        if len(queries) > self.num_queries:
+            queries = queries[: self.num_queries]
+        return queries
+
+    def _try_json_array(self, text: str) -> list | None:
+        try:
+            result = json.loads(text)
+            if isinstance(result, list) and len(result) > 0:
+                return result
+        except json.JSONDecodeError:
+            pass
+        return None
 
     def _save_results(self, results: dict, path: Path) -> None:
         with open(path, "w", encoding="utf-8") as f:

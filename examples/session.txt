@@ -1,0 +1,11 @@
+DATE: 2024-03-12
+
+Dr. Lin: Your A1C came back at 7.8 percent, up from 7.1 at the last visit three months ago.
+Patient: I was afraid of that. I have been travelling for work since January and eating out most nights.
+Dr. Lin: Are you still on metformin 1000 milligrams twice a day?
+Patient: Yes, but I skip the evening dose maybe twice a week when I get back to the hotel late.
+Dr. Lin: What do your morning readings look like?
+Patient: Mostly between 140 and 165. After dinner I have seen 220 once or twice.
+Dr. Lin: Then the fasting numbers are the bigger problem. Let us keep metformin as it is, add a bedtime reminder, and recheck the A1C in eight weeks before we consider a second agent.
+Patient: My father went on insulin at about my age. Is that where this is heading?
+Dr. Lin: Not yet. Fasting glucose in the 140s responds well to consistent dosing, and you have no sign of kidney involvement.

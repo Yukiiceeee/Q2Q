@@ -132,6 +132,12 @@ class Q2QConfig:
         config.retrieval.fq_style = os.getenv("FQ_STYLE", "formal")
         config.retrieval.fq_role = os.getenv("FQ_ROLE", "user")
 
+        # Prompt language for memory construction and answering. Falls back to
+        # the dataclass default when unset, so an existing .env keeps its
+        # current behaviour. The MedMemoryBench adapter sets this field
+        # directly from the dataset config instead of through the environment.
+        config.language = os.getenv("LANGUAGE", config.language)
+
         config.log.level = os.getenv("LOG_LEVEL", "INFO")
         config.log.log_dir = os.getenv("LOG_DIR", "logs")
         config.log.output_dir = os.getenv("OUTPUT_DIR", "outputs")

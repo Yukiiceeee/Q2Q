@@ -1,6 +1,12 @@
 # Q2Q: Query-to-Query Agent Memory System
 
-An agent memory system built on anchor-query generation and dual-path joint retrieval.
+An agent memory system built on anchor-query generation and dual-path joint
+retrieval.
+
+This repository provides the method implementation. Its experiments are run
+under the [MedMemoryBench](https://github.com/AQ-MedAI/MedMemoryBench)
+evaluation framework rather than an entry point of its own; see
+[Evaluation](#evaluation) and [EVALUATION.md](EVALUATION.md).
 
 ## Approach
 
@@ -11,10 +17,13 @@ An agent memory system built on anchor-query generation and dual-path joint retr
 
 ## Installation
 
-Verified on Python 3.10.
+Verified on Python 3.10, which is also the version `requirements-lock.txt` was
+resolved against. Use a versioned interpreter when creating the environment:
+many systems ship only `python3` or `python3.10` and have no bare `python` on
+`PATH`, so the command below fails confusingly if copied verbatim.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3.10 -m venv .venv && source .venv/bin/activate
 
 # Core runtime
 pip install -r requirements.txt
@@ -47,15 +56,25 @@ that cache lives.
 
 ## Usage
 
+`examples/session.txt` is a short synthetic clinical dialogue, included so that
+the commands below run against a fresh clone. It carries no license
+restriction. Real corpora are not distributed here; see
+[DATASETS.md](DATASETS.md).
+
+Global flags precede the subcommand. The sample is English while `LANGUAGE`
+defaults to `zh`, so pass `--language en` or set `LANGUAGE=en` in `.env`:
+Q2Q generates its own anchor queries and propositions, and leaving the default
+in place produces Chinese anchors over English evidence.
+
 ```bash
 # Store memory
-python main.py memorize --file data/session.txt
+python main.py --language en memorize --file examples/session.txt
 
 # Retrieve
-python main.py query "How well is the patient's blood glucose controlled?"
+python main.py --language en query "How well is the patient's blood glucose controlled?"
 
 # Interactive session
-python main.py interactive
+python main.py --language en interactive
 
 # Statistics
 python main.py stats
@@ -63,6 +82,35 @@ python main.py stats
 # Clear memory
 python main.py clear
 ```
+
+## Model weights
+
+No weights are distributed with this repository. The default configuration
+needs two checkpoints on disk. Fetch them into `MODELS_DIR` keeping the
+directory names intact, since those names are what the configs resolve:
+
+```bash
+mkdir -p models && cd models
+git lfs install
+git clone https://huggingface.co/BAAI/bge-large-en-v1.5        # DEFAULT_EMBEDDING_MODEL
+git clone https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct    # COMPRESSOR_MODEL
+```
+
+The embedding checkpoint backs `EMBEDDING_PROVIDER=local`, and
+`Qwen2.5-0.5B-Instruct` backs the perplexity compression that
+`MemoryConstructor` runs on every session, so both are needed before the first
+`memorize`. A third, `flan-t5-large`, is needed only for
+`PROPOSITION_MODE=nlp` (`NLP_INFERENCE_MODEL`, which also requires
+`sentencepiece`); the default `llm` mode does not load it.
+
+Setting `EMBEDDING_PROVIDER=openai` with an API model id in
+`DEFAULT_EMBEDDING_MODEL` removes the embedding checkpoint from this list but
+not the compressor.
+
+Match the embedding checkpoint to the language of the corpus. Q2Q indexes
+anchor queries it generates itself, so an English checkpoint over Chinese text
+degrades retrieval sharply; `bge-small-zh-v1.5` is the Chinese counterpart
+used for the reported Chinese results.
 
 ## Asset path convention
 
@@ -109,10 +157,20 @@ Configured through `.env`; see `.env.example` for the complete list.
 | `COMPRESSOR_MODEL` | Perplexity compression model | Qwen2.5-0.5B-Instruct |
 | `NLP_INFERENCE_MODEL` | Inference model for `nlp` mode | flan-t5-large |
 | `STORAGE_CHROMADB_PATH` | ChromaDB persistence directory | data/chromadb |
+| `LANGUAGE` | Prompt language for construction and answering (zh/en) | zh |
 | `FQ_STYLE` | Anchor-query phrasing (formal/colloquial/keyword/elliptical) | formal |
 | `FQ_ROLE` | Anchor-query perspective (user/otherside) | user |
 | `Q2Q_ANCHOR_WEIGHT` | Anchor-query weighting coefficient | - |
 | `LOG_LEVEL` | Log level | INFO |
+
+A `-` means the code carries no default and the value must be supplied.
+`.env.example` ships a working value for each of them.
+
+> `LANGUAGE` has to match the language of the corpus being memorized, because
+> Q2Q generates its own anchor queries and propositions rather than indexing
+> the source text alone. The default is `zh`; `main.py --language` overrides it
+> per invocation, and `experiment/configs/base.yaml` sets `en` for the
+> experiments, so the reported results are unaffected by this default.
 
 > Scene routing (dialogue / trajectory / document) is decided automatically at
 > memory-construction time by `src/preprocessing/scene_detector.py` from the
@@ -138,6 +196,7 @@ Q2Q/
 │   ├── storage/             # Storage layer (ChromaDB)
 │   └── utils/               # LLM client, logging, tokenizer
 ├── experiment/              # Motivation analysis (generation/embedding/store/runs)
+├── examples/                # Sample input for the commands in Usage
 ├── scripts/                 # Launch scripts
 ├── models/                  # Local model weights (not tracked)
 ├── data/                    # Datasets (not tracked)
@@ -145,17 +204,45 @@ Q2Q/
 └── outputs/                 # Evaluation output
 ```
 
-> Evaluation is driven by an external harness (MedMemoryBench
-> `scripts/run_eval.sh`); this repository no longer ships an evaluation entry
-> point.
+## Evaluation
+
+**The experiments in this repository are run under the MedMemoryBench
+evaluation framework.** This repository provides the method implementation and
+deliberately ships no evaluation entry point: every reported number was
+produced by the MedMemoryBench harness driving `agent.py` through a thin
+adapter (`methods/q2q_agent.py` there), launched as
+
+```bash
+bash scripts/run_eval.sh q2q_gpt-5.1 locomo   # from the MedMemoryBench root
+```
+
+The harness owns the datasets, the metrics, the answer judging, and the
+per-method hyperparameter configs. Keeping it out of this repository is what
+makes Q2Q comparable to the other methods it is reported against: they are all
+measured by the same evaluator, with no method-specific evaluation code in the
+loop.
+
+[EVALUATION.md](EVALUATION.md) documents how that adapter is written, the five
+integration hazards specific to Q2Q, the method config behind the reported
+numbers, and what to check in a finished run. Read it before evaluating a new
+Q2Q variant.
 
 ## Experiment artifacts
 
 `store/`, `results/`, and `figs/` under `experiment/` are all run output and are
-not distributed with the repository:
+not distributed with the repository.
+
+Experiments are driven by `experiment/run.py`, which requires both a dataset
+config and a step. The steps are ordered: `generate` writes the anchor and
+indirect queries, `embed` turns them into vectors, and the `expN` steps read
+those vectors.
 
 ```bash
-python experiment/run.py          # regenerate
+python experiment/run.py --dataset experiment/configs/locomo.yaml --step generate
+python experiment/run.py --dataset experiment/configs/locomo.yaml --step embed
+python experiment/run.py --dataset experiment/configs/locomo.yaml --step exp1
+python experiment/run.py --dataset experiment/configs/locomo.yaml --step all   # all of the above
+
 open experiment/web/index.html    # view results
 ```
 

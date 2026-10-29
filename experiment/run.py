@@ -368,7 +368,7 @@ async def async_main():
     )
     parser.add_argument(
         "--step", type=str, required=True,
-        choices=["generate", "embed", "exp1", "exp2", "exp3", "exp4", "all"],
+        choices=["generate", "embed", "exp1", "exp2", "exp3", "all"],
         help="Which step to run",
     )
     parser.add_argument(
@@ -423,8 +423,8 @@ async def async_main():
         await step_exp1(base_config, dataset_config, args)
         await step_exp2(base_config, dataset_config, args)
         await step_exp3(base_config, dataset_config, args)
-    else:
-        print(f"Step '{args.step}' not yet implemented.")
+    else:  # unreachable: argparse restricts --step to the branches above
+        raise ValueError(f"Unhandled step: {args.step!r}")
 
     elapsed = time.time() - t_start
     logging.info(f"Step '{args.step}' completed in {elapsed:.1f}s")
